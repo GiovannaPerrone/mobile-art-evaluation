@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Triagem de Avarias</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="title-block">
+      <span class="kicker">Avaliação organoléptica e óptica assistida por celular</span>
+      <h1>Triagem de avarias em obras de arte</h1>
+    </div>
+    <span class="engine" id="engine" data-state="loading" role="status"><i></i><span id="engineText">Carregando motor de visão</span></span>
+  </header>
+
+  <p class="principle">Ferramenta de triagem inicial. Ela organiza a fila de inspeção e economiza tempo, mas a análise e o laudo continuam sendo do restaurador ou museólogo.</p>
+
+  <div class="layout">
+    <div class="col">
+      <section class="panel" aria-labelledby="h-ref">
+        <div class="panel-head">
+          <h2 id="h-ref">1. Captura de referência</h2>
+          <span class="pill idle" id="refPill">aguardando foto</span>
+        </div>
+        <p class="muted">Fotografe a obra com luz normal, de frente, com a peça inteira no quadro. A resolução original é preservada na medição e reduzida só para processar.</p>
+        <div class="btn-row">
+          <label class="btn primary" for="refCam" id="refCamBtn" aria-disabled="true">Fotografar obra</label>
+          <label class="btn" for="refFile" id="refFileBtn" aria-disabled="true">Escolher da galeria</label>
+          <input type="file" id="refCam" accept="image/*" capture="environment">
+          <input type="file" id="refFile" accept="image/*">
+        </div>
+        <div class="status-line" id="refStatus"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-view">
+        <div class="panel-head">
+          <h2 id="h-view">Mapa de condição</h2>
+          <span class="muted mono" id="viewInfo"></span>
+        </div>
+        <div class="stage" id="stage">
+          <p class="empty">A imagem analisada aparece aqui, com os danos marcados e as regiões descartadas.</p>
+        </div>
+        <div class="chips" id="chips" hidden>
+          <label class="chip"><input type="checkbox" id="tglDamage" checked><span>Danos</span></label>
+          <label class="chip"><input type="checkbox" id="tglTiles"><span>Regiões descartadas</span></label>
+          <label class="chip"><input type="checkbox" id="tglSec" disabled><span>2ª captura alinhada</span></label>
+        </div>
+        <div class="slider" id="alphaWrap" hidden>
+          <label for="alpha">Mistura da 2ª captura sobre a referência: <span class="mono" id="alphaVal">50%</span></label>
+          <input type="range" id="alpha" min="0" max="100" value="50">
+        </div>
+        <div class="legend" id="legend" hidden>
+          <span><i style="border-color: var(--c-both)"></i>nas duas capturas</span>
+          <span><i style="border-color: var(--c-normal)"></i>só luz normal</span>
+          <span><i style="border-color: var(--c-raking)"></i>só 2ª captura</span>
+          <span class="mono">R rachadura · C perda de cor</span>
+        </div>
+        <div class="btn-row" id="mapBtnRow" hidden>
+          <button class="btn" id="makeImg" type="button">Gerar imagem do mapa</button>
+        </div>
+        <div class="map-out" id="mapOut" hidden>
+          <img id="mapImg" alt="Mapa de condição gerado">
+          <p class="muted">Toque e segure a imagem para salvar no celular.</p>
+        </div>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="panel" aria-labelledby="h-ill">
+        <div class="panel-head">
+          <h2 id="h-ill">Iluminação da captura</h2>
+          <span class="pill idle" id="illPill">sem leitura</span>
+        </div>
+        <div class="meter">
+          <div class="meter-row"><span>Luminância média</span><span class="mono" id="illVal">--</span></div>
+          <div class="meter-track" aria-hidden="true">
+            <div class="meter-band" id="illBand"></div>
+            <div class="meter-needle" id="illNeedle"></div>
+          </div>
+          <div class="meter-row muted"><span class="mono">0</span><span class="mono">faixa aceita <span id="illRange"></span></span><span class="mono">255</span></div>
+        </div>
+        <div class="mini-stats">
+          <div class="mini"><span class="lab">Pixels saturados</span><span class="val" id="illClip">--</span></div>
+          <div class="mini"><span class="lab">Pixels muito escuros</span><span class="val" id="illDark">--</span></div>
+        </div>
+        <p class="status-line" id="illMsg"></p>
+        <div class="btn-row" id="overrideRow" hidden>
+          <button class="btn" id="override" type="button">Analisar mesmo assim</button>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-sec">
+        <div class="panel-head">
+          <h2 id="h-sec">2. Segunda captura</h2>
+          <span class="pill idle" id="secPill">opcional</span>
+        </div>
+        <p class="muted">Luz rasante ou luz transmitida, sem mover a obra e com enquadramento parecido. O app alinha as duas fotos por pontos de interesse (ORB) e junta os danos num mapa só.</p>
+        <div class="btn-row">
+          <label class="btn primary" for="secCam" id="secCamBtn" aria-disabled="true">Fotografar</label>
+          <label class="btn" for="secFile" id="secFileBtn" aria-disabled="true">Escolher da galeria</label>
+          <input type="file" id="secCam" accept="image/*" capture="environment">
+          <input type="file" id="secFile" accept="image/*">
+        </div>
+        <div class="status-line" id="secStatus"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-tri">
+        <div class="panel-head">
+          <h2 id="h-tri">Triagem</h2>
+        </div>
+        <div class="triage" id="triage" data-level="">
+          <div class="triage-level"><span class="muted">Prioridade de inspeção</span><strong id="triLevel">--</strong></div>
+          <div class="mini-stats">
+            <div class="mini"><span class="lab">Danos marcados</span><span class="val" id="triCount">--</span></div>
+            <div class="mini"><span class="lab">Área afetada</span><span class="val" id="triArea">--</span></div>
+            <div class="mini"><span class="lab">Regiões descartadas</span><span class="val" id="triRej">--</span></div>
+            <div class="mini"><span class="lab">Tempo de análise</span><span class="val" id="triMs">--</span></div>
+          </div>
+          <p class="muted" style="font-size:0.8rem">Os limites de prioridade são heurísticos e servem para ordenar a fila, não para classificar o estado da obra.</p>
+        </div>
+        <div class="tbl-wrap" id="tblWrap" hidden>
+          <table>
+            <thead><tr><th>#</th><th>Tipo</th><th>Posição (x, y)</th><th>Visto em</th></tr></thead>
+            <tbody id="tblBody"></tbody>
+          </table>
+        </div>
+        <details>
+          <summary>Ajustar sensibilidade</summary>
+          <div>
+            <div class="slider">
+              <label for="sCrack">Rachaduras: <span class="mono" id="sCrackVal"></span></label>
+              <input type="range" id="sCrack" min="2" max="6" step="0.5" value="4">
+            </div>
+            <div class="slider">
+              <label for="sLoss">Perda de cor: <span class="mono" id="sLossVal"></span></label>
+              <input type="range" id="sLoss" min="25" max="70" step="1" value="42">
+            </div>
+            <p class="muted" style="font-size:0.8rem">Valores menores detectam mais, com mais falsos alarmes. Rachaduras: desvios acima da média local. Perda de cor: distância ao fundo local.</p>
+            <div class="btn-row"><button class="btn" id="reanalyze" type="button" disabled>Reanalisar</button></div>
+          </div>
+        </details>
+        <details>
+          <summary>Dados da execução</summary>
+          <div>
+            <dl class="kv" id="kv"></dl>
+            <div class="btn-row"><button class="btn" id="copyJson" type="button" disabled>Copiar relatório (JSON)</button></div>
+            <textarea class="fallback" id="jsonFallback" readonly hidden aria-label="Relatório em JSON"></textarea>
+          </div>
+        </details>
+      </section>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<!-- 1) pipeline de visao (OpenCV.js) -->
+<script src="js/pipeline.js"></script>
+<!-- 2) interface e fluxo do app (o motor OpenCV.js e carregado por aqui, via CDN) -->
+<script src="js/app.js"></script>
+</body>
+</html>

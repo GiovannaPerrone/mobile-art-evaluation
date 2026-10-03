@@ -1,0 +1,1108 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Triagem de Avarias</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Reset basico (a pagina publicada como artefato ja trazia isto) */
+html { color-scheme: light; }
+body { margin: 0; }
+[hidden] { display: none !important; }
+img { max-width: 100%; }
+
+/* Layout: coluna unica no celular (captura > leitura da imagem > triagem); em tela larga a imagem fica a esquerda e a leitura a direita.
+   Cores: neutros de laboratorio com vies verde-azulado; cores de sobreposicao fixas para ler sobre qualquer pintura. */
+:root {
+  --bg: #eef1f0;
+  --surface: #ffffff;
+  --surface-2: #e4e9e7;
+  --line: #cdd5d2;
+  --fg: #16201e;
+  --fg-muted: #55635f;
+  --accent: #0b6b63;
+  --accent-fg: #ffffff;
+  --ok: #1d7a4b;
+  --warn: #9a5b08;
+  --crit: #b3261e;
+  --ok-bg: #dcefe4;
+  --warn-bg: #f6e8cf;
+  --crit-bg: #f6dcd9;
+  --font-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --c-both: #ffd21f;
+  --c-normal: #ff4b33;
+  --c-raking: #1fd1ff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101514; --surface: #182120; --surface-2: #213030; --line: #2f3f3d;
+    --fg: #e6eeec; --fg-muted: #9db0ab; --accent: #4fd1c0; --accent-fg: #06201d;
+    --ok: #5bd08a; --warn: #f0b04a; --crit: #ff8579;
+    --ok-bg: #173325; --warn-bg: #3a2c12; --crit-bg: #3d1b18;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101514; --surface: #182120; --surface-2: #213030; --line: #2f3f3d;
+  --fg: #e6eeec; --fg-muted: #9db0ab; --accent: #4fd1c0; --accent-fg: #06201d;
+  --ok: #5bd08a; --warn: #f0b04a; --crit: #ff8579;
+  --ok-bg: #173325; --warn-bg: #3a2c12; --crit-bg: #3d1b18;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.5; padding-inline: 16px; padding-block: 20px 48px; }
+.wrap { max-width: 1040px; margin-inline: auto; display: flex; flex-direction: column; gap: 20px; }
+h1, h2 { font-family: var(--font-display); font-weight: 700; margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+h1 { font-size: 1.7rem; line-height: 1.1; }
+h2 { font-size: 1.1rem; }
+p { margin: 0; }
+.kicker { font-family: var(--font-data); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-muted); }
+.muted { color: var(--fg-muted); }
+.mono { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+
+header.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.title-block { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.engine { font-family: var(--font-data); font-size: 0.75rem; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--fg-muted); display: inline-flex; align-items: center; gap: 8px; background: var(--surface); }
+.engine i { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); display: inline-block; }
+.engine[data-state="ready"] i { background: var(--ok); }
+.engine[data-state="error"] i { background: var(--crit); }
+.principle { border-left: 3px solid var(--accent); padding: 4px 0 4px 12px; color: var(--fg-muted); font-size: 0.9rem; }
+
+.layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (min-width: 880px) { .layout { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); } }
+.col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.panel-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; }
+
+.btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn { font: inherit; font-weight: 600; min-height: 44px; padding: 10px 16px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface-2); color: var(--fg); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; text-align: center; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.btn:focus-visible, input:focus-visible, summary:focus-visible, .chip input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 2px; }
+input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+.status-line { font-size: 0.9rem; min-height: 1.3em; }
+.pill { display: inline-flex; align-items: center; font-family: var(--font-data); font-size: 0.75rem; font-weight: 500; padding: 3px 10px; border-radius: 999px; letter-spacing: 0.02em; }
+.pill.ok { background: var(--ok-bg); color: var(--ok); }
+.pill.warn { background: var(--warn-bg); color: var(--warn); }
+.pill.crit { background: var(--crit-bg); color: var(--crit); }
+.pill.idle { background: var(--surface-2); color: var(--fg-muted); }
+
+/* medidor de iluminacao: faixa aceita marcada sobre a escala 0-255 */
+.meter { display: grid; gap: 6px; }
+.meter-row { display: flex; justify-content: space-between; gap: 8px; font-size: 0.85rem; }
+.meter-track { position: relative; height: 12px; border-radius: 6px; background: var(--surface-2); overflow: hidden; }
+.meter-band { position: absolute; top: 0; bottom: 0; background: var(--ok-bg); border-inline: 2px solid var(--ok); }
+.meter-needle { position: absolute; top: -2px; bottom: -2px; width: 4px; margin-left: -2px; background: var(--fg); border-radius: 2px; left: 0; }
+.mini-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.mini { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.mini .lab { font-size: 0.75rem; color: var(--fg-muted); }
+.mini .val { font-family: var(--font-data); font-variant-numeric: tabular-nums; font-size: 1.05rem; }
+
+/* visualizador */
+.stage { background: var(--surface-2); border-radius: 6px; overflow: hidden; display: grid; place-items: center; min-height: 180px; }
+.stage canvas { display: block; width: 100%; height: auto; max-width: 100%; }
+.stage .empty { padding: 28px 16px; text-align: center; color: var(--fg-muted); font-size: 0.9rem; max-width: 34ch; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { position: relative; }
+.chip input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.chip span { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); font-size: 0.85rem; background: var(--surface); }
+.chip input:checked + span { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.chip input:disabled + span { opacity: 0.45; }
+.slider { display: grid; gap: 4px; font-size: 0.85rem; }
+.slider input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.8rem; color: var(--fg-muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 14px; height: 14px; border-radius: 3px; display: inline-block; border: 2px solid; background: transparent; }
+
+/* triagem */
+.triage { display: grid; gap: 10px; }
+.triage-level { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.triage-level strong { font-family: var(--font-display); font-size: 1.5rem; text-transform: capitalize; }
+.triage[data-level="baixa"] strong { color: var(--ok); }
+.triage[data-level="media"] strong { color: var(--warn); }
+.triage[data-level="alta"] strong { color: var(--crit); }
+.tbl-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-muted); }
+td.num { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: baseline; }
+
+details { border-top: 1px solid var(--line); padding-top: 12px; }
+summary { cursor: pointer; font-weight: 600; min-height: 32px; display: flex; align-items: center; }
+details > div { margin-top: 10px; display: flex; flex-direction: column; gap: 10px; }
+.kv { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 4px 12px; font-size: 0.82rem; }
+.kv dt { color: var(--fg-muted); }
+.kv dd { margin: 0; font-family: var(--font-data); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.map-out { display: flex; flex-direction: column; gap: 8px; }
+.map-out img { width: 100%; height: auto; max-width: 100%; border-radius: 6px; display: block; }
+textarea.fallback { width: 100%; min-height: 120px; font-family: var(--font-data); font-size: 0.75rem; background: var(--surface-2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.toast { position: fixed; left: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); max-width: 420px; margin-inline: auto; background: var(--fg); color: var(--bg); padding: 10px 14px; border-radius: 8px; font-size: 0.9rem; z-index: 10; }
+@media (prefers-reduced-motion: no-preference) { .meter-needle { transition: left 0.3s ease; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="title-block">
+      <span class="kicker">Avaliação organoléptica e óptica assistida por celular</span>
+      <h1>Triagem de avarias em obras de arte</h1>
+    </div>
+    <span class="engine" id="engine" data-state="loading" role="status"><i></i><span id="engineText">Carregando motor de visão</span></span>
+  </header>
+
+  <p class="principle">Ferramenta de triagem inicial. Ela organiza a fila de inspeção e economiza tempo, mas a análise e o laudo continuam sendo do restaurador ou museólogo.</p>
+
+  <div class="layout">
+    <div class="col">
+      <section class="panel" aria-labelledby="h-ref">
+        <div class="panel-head">
+          <h2 id="h-ref">1. Captura de referência</h2>
+          <span class="pill idle" id="refPill">aguardando foto</span>
+        </div>
+        <p class="muted">Fotografe a obra com luz normal, de frente, com a peça inteira no quadro. A resolução original é preservada na medição e reduzida só para processar.</p>
+        <div class="btn-row">
+          <label class="btn primary" for="refCam" id="refCamBtn" aria-disabled="true">Fotografar obra</label>
+          <label class="btn" for="refFile" id="refFileBtn" aria-disabled="true">Escolher da galeria</label>
+          <input type="file" id="refCam" accept="image/*" capture="environment">
+          <input type="file" id="refFile" accept="image/*">
+        </div>
+        <div class="status-line" id="refStatus"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-view">
+        <div class="panel-head">
+          <h2 id="h-view">Mapa de condição</h2>
+          <span class="muted mono" id="viewInfo"></span>
+        </div>
+        <div class="stage" id="stage">
+          <p class="empty">A imagem analisada aparece aqui, com os danos marcados e as regiões descartadas.</p>
+        </div>
+        <div class="chips" id="chips" hidden>
+          <label class="chip"><input type="checkbox" id="tglDamage" checked><span>Danos</span></label>
+          <label class="chip"><input type="checkbox" id="tglTiles"><span>Regiões descartadas</span></label>
+          <label class="chip"><input type="checkbox" id="tglSec" disabled><span>2ª captura alinhada</span></label>
+        </div>
+        <div class="slider" id="alphaWrap" hidden>
+          <label for="alpha">Mistura da 2ª captura sobre a referência: <span class="mono" id="alphaVal">50%</span></label>
+          <input type="range" id="alpha" min="0" max="100" value="50">
+        </div>
+        <div class="legend" id="legend" hidden>
+          <span><i style="border-color: var(--c-both)"></i>nas duas capturas</span>
+          <span><i style="border-color: var(--c-normal)"></i>só luz normal</span>
+          <span><i style="border-color: var(--c-raking)"></i>só 2ª captura</span>
+          <span class="mono">R rachadura · C perda de cor</span>
+        </div>
+        <div class="btn-row" id="mapBtnRow" hidden>
+          <button class="btn" id="makeImg" type="button">Gerar imagem do mapa</button>
+        </div>
+        <div class="map-out" id="mapOut" hidden>
+          <img id="mapImg" alt="Mapa de condição gerado">
+          <p class="muted">Toque e segure a imagem para salvar no celular.</p>
+        </div>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="panel" aria-labelledby="h-ill">
+        <div class="panel-head">
+          <h2 id="h-ill">Iluminação da captura</h2>
+          <span class="pill idle" id="illPill">sem leitura</span>
+        </div>
+        <div class="meter">
+          <div class="meter-row"><span>Luminância média</span><span class="mono" id="illVal">--</span></div>
+          <div class="meter-track" aria-hidden="true">
+            <div class="meter-band" id="illBand"></div>
+            <div class="meter-needle" id="illNeedle"></div>
+          </div>
+          <div class="meter-row muted"><span class="mono">0</span><span class="mono">faixa aceita <span id="illRange"></span></span><span class="mono">255</span></div>
+        </div>
+        <div class="mini-stats">
+          <div class="mini"><span class="lab">Pixels saturados</span><span class="val" id="illClip">--</span></div>
+          <div class="mini"><span class="lab">Pixels muito escuros</span><span class="val" id="illDark">--</span></div>
+        </div>
+        <p class="status-line" id="illMsg"></p>
+        <div class="btn-row" id="overrideRow" hidden>
+          <button class="btn" id="override" type="button">Analisar mesmo assim</button>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-sec">
+        <div class="panel-head">
+          <h2 id="h-sec">2. Segunda captura</h2>
+          <span class="pill idle" id="secPill">opcional</span>
+        </div>
+        <p class="muted">Luz rasante ou luz transmitida, sem mover a obra e com enquadramento parecido. O app alinha as duas fotos por pontos de interesse (ORB) e junta os danos num mapa só.</p>
+        <div class="btn-row">
+          <label class="btn primary" for="secCam" id="secCamBtn" aria-disabled="true">Fotografar</label>
+          <label class="btn" for="secFile" id="secFileBtn" aria-disabled="true">Escolher da galeria</label>
+          <input type="file" id="secCam" accept="image/*" capture="environment">
+          <input type="file" id="secFile" accept="image/*">
+        </div>
+        <div class="status-line" id="secStatus"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-tri">
+        <div class="panel-head">
+          <h2 id="h-tri">Triagem</h2>
+        </div>
+        <div class="triage" id="triage" data-level="">
+          <div class="triage-level"><span class="muted">Prioridade de inspeção</span><strong id="triLevel">--</strong></div>
+          <div class="mini-stats">
+            <div class="mini"><span class="lab">Danos marcados</span><span class="val" id="triCount">--</span></div>
+            <div class="mini"><span class="lab">Área afetada</span><span class="val" id="triArea">--</span></div>
+            <div class="mini"><span class="lab">Regiões descartadas</span><span class="val" id="triRej">--</span></div>
+            <div class="mini"><span class="lab">Tempo de análise</span><span class="val" id="triMs">--</span></div>
+          </div>
+          <p class="muted" style="font-size:0.8rem">Os limites de prioridade são heurísticos e servem para ordenar a fila, não para classificar o estado da obra.</p>
+        </div>
+        <div class="tbl-wrap" id="tblWrap" hidden>
+          <table>
+            <thead><tr><th>#</th><th>Tipo</th><th>Posição (x, y)</th><th>Visto em</th></tr></thead>
+            <tbody id="tblBody"></tbody>
+          </table>
+        </div>
+        <details>
+          <summary>Ajustar sensibilidade</summary>
+          <div>
+            <div class="slider">
+              <label for="sCrack">Rachaduras: <span class="mono" id="sCrackVal"></span></label>
+              <input type="range" id="sCrack" min="2" max="6" step="0.5" value="4">
+            </div>
+            <div class="slider">
+              <label for="sLoss">Perda de cor: <span class="mono" id="sLossVal"></span></label>
+              <input type="range" id="sLoss" min="25" max="70" step="1" value="42">
+            </div>
+            <p class="muted" style="font-size:0.8rem">Valores menores detectam mais, com mais falsos alarmes. Rachaduras: desvios acima da média local. Perda de cor: distância ao fundo local.</p>
+            <div class="btn-row"><button class="btn" id="reanalyze" type="button" disabled>Reanalisar</button></div>
+          </div>
+        </details>
+        <details>
+          <summary>Dados da execução</summary>
+          <div>
+            <dl class="kv" id="kv"></dl>
+            <div class="btn-row"><button class="btn" id="copyJson" type="button" disabled>Copiar relatório (JSON)</button></div>
+            <textarea class="fallback" id="jsonFallback" readonly hidden aria-label="Relatório em JSON"></textarea>
+          </div>
+        </details>
+      </section>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<!-- 1) pipeline de visao (OpenCV.js) -->
+<script>
+/*
+ * Pipeline de triagem de avarias (on-device, OpenCV.js)
+ * Funciona no navegador (window.createPipeline) e em Node (module.exports).
+ *
+ * Estagios:
+ *   1. checkIllumination  - rejeita a captura se a iluminacao estiver fora da faixa
+ *   2. detectDamage       - (a) rejeicao de tiles sem dano  (b) deteccao nos tiles candidatos
+ *   3. buildConditionMap  - ORB + homografia alinha 2a captura (ex.: luz rasante) a referencia
+ *                           e une as deteccoes num unico mapa
+ */
+(function (root) {
+  function createPipeline(cv) {
+    const P = {};
+
+    P.params = {
+      lumMin: 60,        // luminancia media minima (0-255)
+      lumMax: 210,       // luminancia media maxima
+      clipMax: 0.08,     // fracao maxima de pixels saturados (brilho especular / flash)
+      darkMax: 0.35,     // fracao maxima de pixels muito escuros
+      tile: 32,          // lado do tile da etapa de rejeicao (px)
+      crackSigma: 4.0,   // limiar do black-hat = media + sigma * desvio
+      crackMinThr: 14,
+      crackMaxThr: 70,
+      lossThr: 42,       // distancia (V,S) ao fundo local para perda de cor
+      lossMinV: 150,     // prior: camada de preparo exposta e clara (V alto)
+      lossMaxS: 90,      // ... e pouco saturada (S baixo)
+      lossPosDV: 25,     // ... e mais clara que o fundo local (V - V_local)
+      lossTileFrac: 0.12 // fracao minima de pixels de perda para o tile ser candidato
+    };
+
+    function odd(n) { n = Math.round(n); return n % 2 === 0 ? n + 1 : n; }
+    function now() { return (typeof performance !== 'undefined' ? performance.now() : Date.now()); }
+
+    // ---------------------------------------------------------------- 1. iluminacao
+    P.checkIllumination = function (rgba) {
+      const gray = new cv.Mat();
+      cv.cvtColor(rgba, gray, cv.COLOR_RGBA2GRAY);
+      const total = gray.rows * gray.cols;
+      const meanL = cv.mean(gray)[0];
+
+      const hi = new cv.Mat();
+      cv.threshold(gray, hi, 250, 255, cv.THRESH_BINARY);
+      const clipFrac = cv.countNonZero(hi) / total;
+
+      const lo = new cv.Mat();
+      cv.threshold(gray, lo, 25, 255, cv.THRESH_BINARY_INV);
+      const darkFrac = cv.countNonZero(lo) / total;
+
+      gray.delete(); hi.delete(); lo.delete();
+
+      const p = P.params;
+      let ok = true, reason = 'Iluminacao adequada';
+      if (meanL < p.lumMin) { ok = false; reason = 'Imagem escura demais: aumente a iluminacao do ambiente'; }
+      else if (meanL > p.lumMax) { ok = false; reason = 'Imagem clara demais: reduza a luz ou afaste o flash'; }
+      else if (clipFrac > p.clipMax) { ok = false; reason = 'Reflexo especular/saturacao excessiva: mude o angulo do aparelho'; }
+      else if (darkFrac > p.darkMax) { ok = false; reason = 'Areas escuras demais: ilumine melhor a obra'; }
+      return { ok, reason, meanL, clipFrac, darkFrac };
+    };
+
+    // ---------------------------------------------------------------- 2. deteccao
+    /**
+     * @param rgba      Mat RGBA da captura
+     * @param validMask Mat 8UC1 opcional (255 = regiao valida), usada apos o alinhamento
+     * @returns {boxes, mask, tiles, stats}; mask deve ser liberada por quem chamou (mask.delete())
+     */
+    P.detectDamage = function (rgba, validMask) {
+      const t0 = now();
+      const p = P.params;
+      const W = rgba.cols, H = rgba.rows, side = Math.max(W, H);
+      const garbage = [];
+      const keep = (m) => { garbage.push(m); return m; };
+
+      // ---- mapas "baratos" que alimentam a rejeicao -------------------------
+      const gray = keep(new cv.Mat());
+      cv.cvtColor(rgba, gray, cv.COLOR_RGBA2GRAY);
+      const blur = keep(new cv.Mat());
+      cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
+
+      // black-hat: realca estruturas escuras e finas (rachaduras / craquele)
+      const k = odd(Math.max(9, 0.012 * side));
+      const kernel = keep(cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(k, k)));
+      const bh = keep(new cv.Mat());
+      cv.morphologyEx(blur, bh, cv.MORPH_BLACKHAT, kernel);
+
+      const meanStd = { m: new cv.Mat(), s: new cv.Mat() };
+      if (validMask) cv.meanStdDev(bh, meanStd.m, meanStd.s, validMask); else cv.meanStdDev(bh, meanStd.m, meanStd.s);
+      const bhMean = meanStd.m.doubleAt(0, 0), bhStd = meanStd.s.doubleAt(0, 0);
+      meanStd.m.delete(); meanStd.s.delete();
+      let crackThr = bhMean + p.crackSigma * bhStd;
+      crackThr = Math.min(p.crackMaxThr, Math.max(p.crackMinThr, crackThr));
+      const crackMap = keep(new cv.Mat());
+      cv.threshold(bh, crackMap, crackThr, 255, cv.THRESH_BINARY);
+
+      // perda de cor: distancia (V,S) ao fundo local, calculada em baixa resolucao
+      const scale = 0.25;
+      const small = keep(new cv.Mat());
+      cv.resize(rgba, small, new cv.Size(Math.max(8, Math.round(W * scale)), Math.max(8, Math.round(H * scale))), 0, 0, cv.INTER_AREA);
+      const rgb = keep(new cv.Mat());
+      cv.cvtColor(small, rgb, cv.COLOR_RGBA2RGB);
+      const hsv = keep(new cv.Mat());
+      cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV);
+      const loc = keep(new cv.Mat());
+      const mk = odd(Math.max(15, 0.035 * Math.max(small.cols, small.rows) * 4 / 4 * 3));
+      cv.medianBlur(hsv, loc, Math.min(mk, 61));
+      const chH = new cv.MatVector(), chL = new cv.MatVector();
+      cv.split(hsv, chH); cv.split(loc, chL);
+      const dV = keep(new cv.Mat()), dS = keep(new cv.Mat());
+      cv.absdiff(chH.get(2), chL.get(2), dV);
+      cv.absdiff(chH.get(1), chL.get(1), dS);
+      chH.delete(); chL.delete();
+      const dV32 = keep(new cv.Mat()), dS32 = keep(new cv.Mat()), dist32 = keep(new cv.Mat());
+      dV.convertTo(dV32, cv.CV_32F); dS.convertTo(dS32, cv.CV_32F);
+      cv.multiply(dV32, dV32, dV32); cv.multiply(dS32, dS32, dS32);
+      cv.add(dV32, dS32, dist32); cv.sqrt(dist32, dist32);
+      const lossSmall = keep(new cv.Mat());
+      cv.threshold(dist32, lossSmall, p.lossThr, 255, cv.THRESH_BINARY);
+      lossSmall.convertTo(lossSmall, cv.CV_8U);
+      // prior de camada de preparo exposta: clara, pouco saturada e mais clara que o fundo local
+      {
+        const hs = new cv.MatVector(), ls = new cv.MatVector();
+        cv.split(hsv, hs); cv.split(loc, ls);
+        const vHi = new cv.Mat(), sLo = new cv.Mat(), vDiff = new cv.Mat(), vPos = new cv.Mat(), prior = new cv.Mat();
+        cv.threshold(hs.get(2), vHi, p.lossMinV - 1, 255, cv.THRESH_BINARY);
+        cv.threshold(hs.get(1), sLo, p.lossMaxS, 255, cv.THRESH_BINARY_INV);
+        const v16 = new cv.Mat(), l16 = new cv.Mat();
+        hs.get(2).convertTo(v16, cv.CV_16S); ls.get(2).convertTo(l16, cv.CV_16S);
+        cv.subtract(v16, l16, vDiff);
+        cv.threshold(vDiff, vPos, p.lossPosDV - 1, 255, cv.THRESH_BINARY);
+        vPos.convertTo(vPos, cv.CV_8U);
+        cv.bitwise_and(vHi, sLo, prior); cv.bitwise_and(prior, vPos, prior);
+        cv.bitwise_and(lossSmall, prior, lossSmall);
+        hs.delete(); ls.delete(); vHi.delete(); sLo.delete(); vDiff.delete(); vPos.delete(); prior.delete(); v16.delete(); l16.delete();
+      }
+
+      // ---- estagio A: rejeicao por tiles -----------------------------------
+      const T = p.tile;
+      const cols = Math.ceil(W / T), rows = Math.ceil(H / T);
+      const tileKeep = new Uint8Array(cols * rows); // 1 = candidato
+      const lossFull = keep(new cv.Mat());
+      cv.resize(lossSmall, lossFull, new cv.Size(W, H), 0, 0, cv.INTER_NEAREST);
+      let candidates = 0, evaluated = 0;
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const x = c * T, y = r * T, w = Math.min(T, W - x), h = Math.min(T, H - y);
+          const rect = new cv.Rect(x, y, w, h);
+          if (validMask) {
+            const vm = validMask.roi(rect);
+            const okFrac = cv.countNonZero(vm) / (w * h);
+            vm.delete();
+            if (okFrac < 0.9) continue; // tile fora da regiao alinhada
+          }
+          evaluated++;
+          const cr = crackMap.roi(rect); const lo = lossFull.roi(rect);
+          const crackPx = cv.countNonZero(cr);
+          const lossFrac = cv.countNonZero(lo) / (w * h);
+          cr.delete(); lo.delete();
+          if (crackPx >= 6 || lossFrac >= p.lossTileFrac) { tileKeep[r * cols + c] = 1; candidates++; }
+        }
+      }
+      const rejected = evaluated - candidates;
+
+      // mascara de tiles candidatos
+      const tileMask = keep(cv.Mat.zeros(H, W, cv.CV_8UC1));
+      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+        if (!tileKeep[r * cols + c]) continue;
+        const x = c * T, y = r * T;
+        cv.rectangle(tileMask, new cv.Point(x, y), new cv.Point(Math.min(W, x + T) - 1, Math.min(H, y + T) - 1), new cv.Scalar(255), -1);
+      }
+
+      // ---- estagio B: deteccao apenas nos candidatos ------------------------
+      const boxes = [];
+      const outMask = cv.Mat.zeros(H, W, cv.CV_8UC1);
+
+      // rachaduras
+      const crackCand = keep(new cv.Mat());
+      cv.bitwise_and(crackMap, tileMask, crackCand);
+      const k3 = keep(cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3)));
+      cv.morphologyEx(crackCand, crackCand, cv.MORPH_CLOSE, k3);
+      collect(crackCand, 'rachadura', (st) => {
+        const bw = st.w, bh2 = st.h, longSide = Math.max(bw, bh2), shortSide = Math.max(1, Math.min(bw, bh2));
+        const fill = st.area / (bw * bh2);
+        const minLong = Math.max(18, 0.02 * side);
+        return longSide >= minLong && st.area >= 30 && (longSide / shortSide >= 3 || fill < 0.4);
+      });
+
+      // perda de cor
+      const lossCand = keep(new cv.Mat());
+      cv.bitwise_and(lossFull, tileMask, lossCand);
+      const kOpen = keep(cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(odd(0.012 * side), odd(0.012 * side))));
+      const kClose = keep(cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(odd(0.025 * side), odd(0.025 * side))));
+      cv.morphologyEx(lossCand, lossCand, cv.MORPH_OPEN, kOpen);
+      cv.morphologyEx(lossCand, lossCand, cv.MORPH_CLOSE, kClose);
+      collect(lossCand, 'perda de cor', (st) => st.area >= 0.0004 * W * H && st.area <= 0.5 * W * H);
+
+      function collect(bin, type, accept) {
+        const labels = new cv.Mat(), stats = new cv.Mat(), cent = new cv.Mat();
+        const n = cv.connectedComponentsWithStats(bin, labels, stats, cent, 8);
+        for (let i = 1; i < n; i++) {
+          const st = {
+            x: stats.intAt(i, cv.CC_STAT_LEFT), y: stats.intAt(i, cv.CC_STAT_TOP),
+            w: stats.intAt(i, cv.CC_STAT_WIDTH), h: stats.intAt(i, cv.CC_STAT_HEIGHT),
+            area: stats.intAt(i, cv.CC_STAT_AREA)
+          };
+          if (!accept(st)) continue;
+          if (validMask) {
+            const vm = validMask.roi(new cv.Rect(st.x, st.y, st.w, st.h));
+            const okFrac = cv.countNonZero(vm) / (st.w * st.h);
+            vm.delete();
+            if (okFrac < 0.8) continue;
+          }
+          boxes.push({ x: st.x, y: st.y, w: st.w, h: st.h, area: st.area, type });
+          // pinta apenas o componente aceito na mascara de saida
+          const roiBin = bin.roi(new cv.Rect(st.x, st.y, st.w, st.h));
+          const roiLab = labels.roi(new cv.Rect(st.x, st.y, st.w, st.h));
+          const comp = new cv.Mat();
+          cv.compare(roiLab, new cv.Mat(st.h, st.w, cv.CV_32S, new cv.Scalar(i)), comp, cv.CMP_EQ);
+          const dst = outMask.roi(new cv.Rect(st.x, st.y, st.w, st.h));
+          cv.bitwise_or(dst, comp, dst);
+          dst.delete(); comp.delete(); roiBin.delete(); roiLab.delete();
+        }
+        labels.delete(); stats.delete(); cent.delete();
+      }
+
+      garbage.forEach((m) => { try { m.delete(); } catch (e) { /* ja liberado */ } });
+
+      const damagePx = cv.countNonZero(outMask);
+      const validPx = validMask ? cv.countNonZero(validMask) : W * H;
+      return {
+        boxes, mask: outMask,
+        tiles: { cols, rows, size: T, keep: tileKeep, evaluated, candidates, rejected },
+        stats: {
+          width: W, height: H, crackThr, damageFrac: damagePx / validPx,
+          rejectedFrac: evaluated ? rejected / evaluated : 0,
+          crackCount: boxes.filter((b) => b.type === 'rachadura').length,
+          lossCount: boxes.filter((b) => b.type === 'perda de cor').length,
+          ms: now() - t0
+        }
+      };
+    };
+
+    // ---------------------------------------------------------------- 3. ORB + Condition Map
+    P.registerCaptures = function (refRGBA, secRGBA) {
+      const t0 = now();
+      const g1 = new cv.Mat(), g2 = new cv.Mat();
+      cv.cvtColor(refRGBA, g1, cv.COLOR_RGBA2GRAY);
+      cv.cvtColor(secRGBA, g2, cv.COLOR_RGBA2GRAY);
+      cv.equalizeHist(g1, g1); cv.equalizeHist(g2, g2); // reduz a diferenca de iluminacao entre as capturas
+
+      const orb = new cv.ORB(2000);
+      const kp1 = new cv.KeyPointVector(), kp2 = new cv.KeyPointVector();
+      const d1 = new cv.Mat(), d2 = new cv.Mat();
+      orb.detectAndCompute(g1, new cv.Mat(), kp1, d1);
+      orb.detectAndCompute(g2, new cv.Mat(), kp2, d2);
+
+      const result = { ok: false, kpRef: kp1.size(), kpSec: kp2.size(), good: 0, inliers: 0, H: null, warped: null, valid: null, reason: '', ms: 0 };
+      if (d1.rows < 8 || d2.rows < 8) {
+        result.reason = 'Poucos pontos de interesse: a obra precisa ter textura visivel nas duas capturas';
+        cleanup(); result.ms = now() - t0; return result;
+      }
+
+      const bf = new cv.BFMatcher(cv.NORM_HAMMING, false);
+      const knn = new cv.DMatchVectorVector();
+      bf.knnMatch(d2, d1, knn, 2); // sec -> ref
+      const src = [], dst = [];
+      for (let i = 0; i < knn.size(); i++) {
+        const m = knn.get(i);
+        if (m.size() < 2) continue;
+        const a = m.get(0), b = m.get(1);
+        if (a.distance < 0.75 * b.distance) {
+          const p2 = kp2.get(a.queryIdx).pt, p1 = kp1.get(a.trainIdx).pt;
+          src.push(p2.x, p2.y); dst.push(p1.x, p1.y);
+        }
+      }
+      result.good = src.length / 2;
+      if (result.good < 12) {
+        result.reason = 'Correspondencias insuficientes (' + result.good + '): refaca a 2a captura enquadrando a mesma obra';
+        bf.delete(); knn.delete(); cleanup(); result.ms = now() - t0; return result;
+      }
+
+      const srcM = cv.matFromArray(result.good, 1, cv.CV_32FC2, src);
+      const dstM = cv.matFromArray(result.good, 1, cv.CV_32FC2, dst);
+      const inl = new cv.Mat();
+      const Hm = cv.findHomography(srcM, dstM, cv.RANSAC, 4.0, inl);
+      result.inliers = Hm.empty() ? 0 : cv.countNonZero(inl);
+      srcM.delete(); dstM.delete(); inl.delete(); bf.delete(); knn.delete();
+
+      if (Hm.empty() || result.inliers < 10) {
+        result.reason = 'Alinhamento nao confiavel (' + result.inliers + ' inliers)';
+        Hm.delete(); cleanup(); result.ms = now() - t0; return result;
+      }
+
+      const warped = new cv.Mat();
+      cv.warpPerspective(secRGBA, warped, Hm, new cv.Size(refRGBA.cols, refRGBA.rows), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(0, 0, 0, 0));
+      const ones = cv.Mat.ones(secRGBA.rows, secRGBA.cols, cv.CV_8UC1);
+      ones.convertTo(ones, cv.CV_8UC1, 255);
+      const valid = new cv.Mat();
+      cv.warpPerspective(ones, valid, Hm, new cv.Size(refRGBA.cols, refRGBA.rows), cv.INTER_NEAREST, cv.BORDER_CONSTANT, new cv.Scalar(0));
+      const ek = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(15, 15));
+      cv.erode(valid, valid, ek);
+      ones.delete(); ek.delete();
+
+      result.ok = true;
+      result.H = Array.from(Hm.data64F);
+      result.warped = warped; result.valid = valid;
+      result.reason = 'Alinhamento ok';
+      Hm.delete(); cleanup(); result.ms = now() - t0; return result;
+
+      function cleanup() { g1.delete(); g2.delete(); d1.delete(); d2.delete(); kp1.delete(); kp2.delete(); orb.delete(); }
+    };
+
+    function iou(a, b) {
+      const x1 = Math.max(a.x, b.x), y1 = Math.max(a.y, b.y);
+      const x2 = Math.min(a.x + a.w, b.x + b.w), y2 = Math.min(a.y + a.h, b.y + b.h);
+      const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+      return inter / (a.w * a.h + b.w * b.h - inter || 1);
+    }
+
+    /**
+     * Une as deteccoes da referencia e da captura alinhada num unico conjunto de entradas.
+     * Cada entrada diz em quantas capturas o dano apareceu (confirmacao cruzada).
+     */
+    P.mergeDetections = function (refDet, secDet, W, H) {
+      const entries = [];
+      const used = new Set();
+      refDet.boxes.forEach((b, i) => {
+        let match = -1, best = 0.05;
+        secDet.boxes.forEach((s, j) => {
+          if (used.has(j)) return;
+          const v = iou(b, s);
+          if (v > best) { best = v; match = j; }
+        });
+        if (match >= 0) used.add(match);
+        entries.push({ ...b, sources: match >= 0 ? ['luz normal', 'luz rasante'] : ['luz normal'] });
+      });
+      secDet.boxes.forEach((s, j) => { if (!used.has(j)) entries.push({ ...s, sources: ['luz rasante'] }); });
+      entries.forEach((e, idx) => {
+        e.id = idx + 1;
+        e.cx = (e.x + e.w / 2) / W; e.cy = (e.y + e.h / 2) / H; // coordenadas normalizadas na obra
+      });
+      return entries;
+    };
+
+    /** Prioridade de inspecao (heuristica, limiares ajustaveis) */
+    P.triage = function (damageFrac, nEntries) {
+      let level = 'baixa';
+      if (damageFrac >= 0.01 || nEntries >= 8) level = 'alta';
+      else if (damageFrac >= 0.002 || nEntries >= 3) level = 'media';
+      return { level, damageFrac, nEntries };
+    };
+
+    return P;
+  }
+
+  if (typeof module !== 'undefined' && module.exports) module.exports = createPipeline;
+  else root.createPipeline = createPipeline;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<!-- 2) interface e fluxo do app (o motor OpenCV.js e carregado por aqui, via CDN) -->
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var MAXSIDE = 1280;
+  var ENGINE_URL = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@5.0.0-release.1/dist/opencv.js';
+
+  var S = {
+    cv: null, P: null,
+    ref: null,   // { mat, canvas, meta, ill, det, ms }
+    sec: null,   // { mat, meta, reg, det, warpedCanvas }
+    merged: null, triage: null,
+    view: { damage: true, tiles: false, sec: false, alpha: 0.5 },
+    forced: false, busy: false, times: {}
+  };
+
+  // ------------------------------------------------------------ utilidades
+  function fmtBytes(n) { return n >= 1048576 ? (n / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.round(n / 1024) + ' kB'; }
+  function pct(x, d) { return (x * 100).toFixed(d == null ? 1 : d).replace('.', ',') + '%'; }
+  function ms(x) { return x >= 1000 ? (x / 1000).toFixed(1).replace('.', ',') + ' s' : Math.round(x) + ' ms'; }
+  function tick() { return new Promise(function (r) { setTimeout(r, 40); }); }
+  function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function setPill(el, cls, text) { el.className = 'pill ' + cls; el.textContent = text; }
+  var toastTimer = null;
+  function toast(msg) {
+    var t = $('toast'); t.textContent = msg; t.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.hidden = true; }, 2600);
+  }
+  function engineState(state, text) { $('engine').dataset.state = state; $('engineText').textContent = text; }
+  function enableCapture(enabled) {
+    ['refCamBtn', 'refFileBtn'].forEach(function (id) { $(id).setAttribute('aria-disabled', enabled ? 'false' : 'true'); });
+    $('refCam').disabled = !enabled; $('refFile').disabled = !enabled;
+  }
+  function enableSecond(enabled) {
+    ['secCamBtn', 'secFileBtn'].forEach(function (id) { $(id).setAttribute('aria-disabled', enabled ? 'false' : 'true'); });
+    $('secCam').disabled = !enabled; $('secFile').disabled = !enabled;
+  }
+
+  // ------------------------------------------------------------ motor (OpenCV.js)
+  function getCV(raw) {
+    return new Promise(function (resolve) {
+      if (raw.Mat) return resolve({ cv: raw });
+      if (typeof raw.then === 'function') raw.then(function (m) { resolve({ cv: m || raw }); });
+      else raw.onRuntimeInitialized = function () { resolve({ cv: raw }); };
+    });
+  }
+  function loadEngine() {
+    var t0 = performance.now();
+    var s = document.createElement('script');
+    s.src = ENGINE_URL; s.async = true;
+    s.onload = function () {
+      getCV(window.cv).then(function (o) {
+        S.cv = o.cv; S.P = window.createPipeline(S.cv);
+        S.times.engineLoad = performance.now() - t0;
+        engineState('ready', 'Motor pronto · ' + ms(S.times.engineLoad));
+        enableCapture(true);
+        initIllumination();
+        $('sCrackVal').textContent = S.P.params.crackSigma.toFixed(1).replace('.', ',') + ' desvios';
+        $('sLossVal').textContent = String(S.P.params.lossThr);
+      });
+    };
+    s.onerror = function () {
+      engineState('error', 'Motor não carregou. Verifique a conexão e recarregue');
+    };
+    document.head.appendChild(s);
+  }
+
+  // ------------------------------------------------------------ leitura de imagem
+  function readImage(file) {
+    return new Promise(function (resolve, reject) {
+      var done = function (src, w, h, revoke) {
+        var scale = Math.min(1, MAXSIDE / Math.max(w, h));
+        var cw = Math.round(w * scale), ch = Math.round(h * scale);
+        var c = document.createElement('canvas'); c.width = cw; c.height = ch;
+        var ctx = c.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(src, 0, 0, cw, ch);
+        if (revoke) revoke();
+        resolve({ canvas: c, meta: { name: file.name, bytes: file.size, origW: w, origH: h, procW: cw, procH: ch } });
+      };
+      if (window.createImageBitmap) {
+        createImageBitmap(file, { imageOrientation: 'from-image' }).then(function (bmp) {
+          done(bmp, bmp.width, bmp.height, function () { if (bmp.close) bmp.close(); });
+        }).catch(function () { viaImg(); });
+      } else viaImg();
+      function viaImg() {
+        var url = URL.createObjectURL(file), img = new Image();
+        img.onload = function () { done(img, img.naturalWidth, img.naturalHeight, function () { URL.revokeObjectURL(url); }); };
+        img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('Não foi possível abrir a imagem')); };
+        img.src = url;
+      }
+    });
+  }
+  function canvasToMat(canvas) {
+    var d = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height);
+    return S.cv.matFromImageData(d);
+  }
+  function matToCanvas(mat) {
+    var c = document.createElement('canvas'); c.width = mat.cols; c.height = mat.rows;
+    var id = new ImageData(new Uint8ClampedArray(mat.data), mat.cols, mat.rows);
+    c.getContext('2d').putImageData(id, 0, 0);
+    return c;
+  }
+
+  // ------------------------------------------------------------ iluminacao (UI)
+  function initIllumination() {
+    var p = S.P.params;
+    $('illBand').style.left = (p.lumMin / 255 * 100) + '%';
+    $('illBand').style.width = ((p.lumMax - p.lumMin) / 255 * 100) + '%';
+    $('illRange').textContent = p.lumMin + '–' + p.lumMax;
+  }
+  function showIllumination(ill) {
+    $('illVal').textContent = ill.meanL.toFixed(0) + ' / 255';
+    $('illNeedle').style.left = (ill.meanL / 255 * 100) + '%';
+    $('illClip').textContent = pct(ill.clipFrac, 2);
+    $('illDark').textContent = pct(ill.darkFrac, 1);
+    $('illMsg').textContent = ill.reason;
+    setPill($('illPill'), ill.ok ? 'ok' : 'crit', ill.ok ? 'adequada' : 'rejeitada');
+  }
+
+  // ------------------------------------------------------------ captura de referencia
+  function freeMat(m) { try { if (m && m.delete) m.delete(); } catch (e) { /* ja liberado */ } }
+  function resetSecond() {
+    if (S.sec) { freeMat(S.sec.mat); if (S.sec.reg) { freeMat(S.sec.reg.warped); freeMat(S.sec.reg.valid); } if (S.sec.det) freeMat(S.sec.det.mask); }
+    S.sec = null; S.view.sec = false;
+    $('tglSec').checked = false; $('tglSec').disabled = true; $('alphaWrap').hidden = true;
+    setPill($('secPill'), 'idle', 'opcional'); $('secStatus').textContent = '';
+  }
+  function resetReference() {
+    resetSecond();
+    if (S.ref) { freeMat(S.ref.mat); if (S.ref.det) freeMat(S.ref.det.mask); }
+    S.ref = null; S.forced = false; S.merged = null; S.triage = null;
+    enableSecond(false); $('overrideRow').hidden = true; $('copyJson').disabled = true; $('reanalyze').disabled = true;
+  }
+
+  async function onReference(file) {
+    if (!file || !S.cv || S.busy) return;
+    S.busy = true;
+    try {
+      resetReference();
+      setPill($('refPill'), 'warn', 'lendo imagem');
+      $('refStatus').textContent = 'Lendo a foto...';
+      await tick();
+      var img = await readImage(file);
+      var t0 = performance.now();
+      var mat = canvasToMat(img.canvas);
+      S.ref = { mat: mat, canvas: img.canvas, meta: img.meta, ill: null, det: null };
+      var ill = S.P.checkIllumination(mat);
+      S.times.illumination = performance.now() - t0;
+      S.ref.ill = ill;
+      showIllumination(ill);
+      drawView();
+      $('refStatus').textContent = 'Original ' + img.meta.origW + ' × ' + img.meta.origH + ' px (' + fmtBytes(img.meta.bytes) + '), processada em ' + img.meta.procW + ' × ' + img.meta.procH + ' px.';
+      if (!ill.ok) {
+        setPill($('refPill'), 'crit', 'captura rejeitada');
+        $('overrideRow').hidden = false;
+        renderTriage();
+        return;
+      }
+      await analyzeReference();
+    } catch (e) {
+      $('refStatus').textContent = 'Erro ao ler a foto: ' + errText(e);
+      setPill($('refPill'), 'crit', 'erro');
+    } finally { S.busy = false; }
+  }
+
+  function errText(e) {
+    if (typeof e === 'number' && S.cv && S.cv.exceptionFromPtr) { try { return S.cv.exceptionFromPtr(e).msg; } catch (x) { /* segue */ } }
+    return (e && e.message) ? e.message : String(e);
+  }
+
+  async function analyzeReference() {
+    setPill($('refPill'), 'warn', 'analisando');
+    $('refStatus').textContent = 'Rejeitando regiões sem dano e detectando candidatos...';
+    await tick();
+    if (S.ref.det) freeMat(S.ref.det.mask);
+    S.ref.det = S.P.detectDamage(S.ref.mat);
+    S.times.detectRef = S.ref.det.stats.ms;
+    setPill($('refPill'), 'ok', 'analisada');
+    $('refStatus').textContent = S.ref.meta.origW + ' × ' + S.ref.meta.origH + ' px (' + fmtBytes(S.ref.meta.bytes) + '), processada em ' + S.ref.meta.procW + ' × ' + S.ref.meta.procH + ' px.';
+    $('overrideRow').hidden = true;
+    enableSecond(true); $('reanalyze').disabled = false; $('copyJson').disabled = false;
+    if (S.sec && S.sec.reg && S.sec.reg.ok) await analyzeSecondDetect();
+    rebuildMerged();
+    drawView(); renderTriage();
+  }
+
+  // ------------------------------------------------------------ segunda captura
+  async function onSecond(file) {
+    if (!file || !S.cv || !S.ref || !S.ref.det || S.busy) return;
+    S.busy = true;
+    try {
+      resetSecond();
+      if (S.ref.det) rebuildMerged();
+      setPill($('secPill'), 'warn', 'lendo imagem');
+      $('secStatus').textContent = 'Lendo a foto...';
+      await tick();
+      var img = await readImage(file);
+      var mat = canvasToMat(img.canvas);
+      S.sec = { mat: mat, meta: img.meta, reg: null, det: null, warpedCanvas: null };
+      setPill($('secPill'), 'warn', 'alinhando');
+      $('secStatus').textContent = 'Alinhando por pontos de interesse (ORB)...';
+      await tick();
+      var reg = S.P.registerCaptures(S.ref.mat, mat);
+      S.sec.reg = reg; S.times.orb = reg.ms;
+      if (!reg.ok) {
+        setPill($('secPill'), 'crit', 'não alinhou');
+        $('secStatus').textContent = reg.reason + '.';
+        drawView(); renderTriage();
+        return;
+      }
+      await analyzeSecondDetect();
+      rebuildMerged();
+      $('tglSec').disabled = false;
+      setPill($('secPill'), 'ok', 'alinhada');
+      $('secStatus').textContent = reg.inliers + ' pontos concordantes de ' + reg.good + ' correspondências. Alinhamento em ' + ms(reg.ms) + '.';
+      drawView(); renderTriage();
+    } catch (e) {
+      $('secStatus').textContent = 'Erro na segunda captura: ' + errText(e);
+      setPill($('secPill'), 'crit', 'erro');
+    } finally { S.busy = false; }
+  }
+
+  async function analyzeSecondDetect() {
+    $('secStatus').textContent = 'Detectando danos na captura alinhada...';
+    await tick();
+    if (S.sec.det) freeMat(S.sec.det.mask);
+    S.sec.det = S.P.detectDamage(S.sec.reg.warped, S.sec.reg.valid);
+    S.times.detectSec = S.sec.det.stats.ms;
+    S.sec.warpedCanvas = matToCanvas(S.sec.reg.warped);
+  }
+
+  function rebuildMerged() {
+    var W = S.ref.canvas.width, H = S.ref.canvas.height;
+    if (S.sec && S.sec.det) S.merged = S.P.mergeDetections(S.ref.det, S.sec.det, W, H);
+    else S.merged = S.ref.det.boxes.map(function (b, i) {
+      return Object.assign({}, b, { id: i + 1, sources: ['luz normal'], cx: (b.x + b.w / 2) / W, cy: (b.y + b.h / 2) / H });
+    });
+    var frac = S.ref.det.stats.damageFrac;
+    if (S.sec && S.sec.det) frac = Math.max(frac, S.sec.det.stats.damageFrac);
+    S.triage = S.P.triage(frac, S.merged.length);
+  }
+
+  // ------------------------------------------------------------ desenho
+  function colorFor(e) {
+    if (e.sources.length > 1) return css('--c-both');
+    return e.sources[0] === 'luz normal' ? css('--c-normal') : css('--c-raking');
+  }
+  function tintMask(mask, rgb, alpha) {
+    var c = document.createElement('canvas'); c.width = mask.cols; c.height = mask.rows;
+    var ctx = c.getContext('2d'), id = ctx.createImageData(mask.cols, mask.rows), d = id.data, m = mask.data;
+    for (var i = 0, n = m.length; i < n; i++) if (m[i]) { var j = i * 4; d[j] = rgb[0]; d[j + 1] = rgb[1]; d[j + 2] = rgb[2]; d[j + 3] = alpha; }
+    ctx.putImageData(id, 0, 0); return c;
+  }
+
+  function paintTo(ctx, W, H, opts) {
+    ctx.drawImage(S.ref.canvas, 0, 0, W, H);
+    if (opts.sec && S.sec && S.sec.warpedCanvas) {
+      ctx.globalAlpha = opts.alpha; ctx.drawImage(S.sec.warpedCanvas, 0, 0, W, H); ctx.globalAlpha = 1;
+    }
+    var det = S.ref.det;
+    if (opts.tiles && det) {
+      var t = det.tiles; ctx.fillStyle = 'rgba(10,14,13,0.55)';
+      for (var r = 0; r < t.rows; r++) for (var c = 0; c < t.cols; c++) {
+        if (!t.keep[r * t.cols + c]) ctx.fillRect(c * t.size, r * t.size, t.size, t.size);
+      }
+    }
+    if (opts.damage && det) {
+      ctx.drawImage(tintMask(det.mask, [255, 75, 51], 110), 0, 0);
+      if (S.sec && S.sec.det) ctx.drawImage(tintMask(S.sec.det.mask, [31, 209, 255], 90), 0, 0);
+      var lw = Math.max(2, W / 450);
+      ctx.font = '600 ' + Math.max(13, Math.round(W / 55)) + 'px ' + css('--font-data');
+      ctx.textBaseline = 'top';
+      (S.merged || []).forEach(function (e) {
+        var pad = lw * 2, x = e.x - pad, y = e.y - pad, w = e.w + pad * 2, h = e.h + pad * 2;
+        ctx.lineWidth = lw + 3; ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.strokeRect(x, y, w, h);
+        ctx.lineWidth = lw; ctx.strokeStyle = colorFor(e); ctx.strokeRect(x, y, w, h);
+        var label = '#' + e.id + ' ' + (e.type === 'rachadura' ? 'R' : 'C');
+        var tw = ctx.measureText(label).width + 8, th = Math.max(13, Math.round(W / 55)) + 6;
+        var ly = y - th >= 0 ? y - th : y, lx = Math.max(0, Math.min(x, W - tw));
+        ctx.fillStyle = colorFor(e); ctx.fillRect(lx, ly, tw, th);
+        ctx.fillStyle = '#111'; ctx.fillText(label, lx + 4, ly + 3);
+      });
+    }
+  }
+
+  function drawView() {
+    var stage = $('stage');
+    if (!S.ref) return;
+    var cv0 = stage.querySelector('canvas');
+    if (!cv0) { stage.textContent = ''; cv0 = document.createElement('canvas'); cv0.setAttribute('role', 'img'); cv0.setAttribute('aria-label', 'Imagem analisada com danos marcados'); stage.appendChild(cv0); }
+    var W = S.ref.canvas.width, H = S.ref.canvas.height;
+    cv0.width = W; cv0.height = H;
+    var hasDet = !!S.ref.det;
+    paintTo(cv0.getContext('2d'), W, H, { damage: hasDet && S.view.damage, tiles: hasDet && S.view.tiles, sec: S.view.sec, alpha: S.view.alpha });
+    $('chips').hidden = false; $('legend').hidden = !hasDet; $('mapBtnRow').hidden = !hasDet;
+    $('tglDamage').disabled = !hasDet; $('tglTiles').disabled = !hasDet;
+    $('alphaWrap').hidden = !(S.view.sec && S.sec && S.sec.warpedCanvas);
+    $('viewInfo').textContent = W + ' × ' + H + ' px';
+  }
+
+  // ------------------------------------------------------------ triagem e metricas
+  function renderTriage() {
+    var det = S.ref && S.ref.det;
+    var tr = $('triage');
+    if (!det || !S.merged || !S.triage) {
+      tr.dataset.level = ''; $('triLevel').textContent = '--';
+      ['triCount', 'triArea', 'triRej', 'triMs'].forEach(function (id) { $(id).textContent = '--'; });
+      $('tblWrap').hidden = true; renderKV(); return;
+    }
+    tr.dataset.level = S.triage.level;
+    $('triLevel').textContent = S.triage.level === 'media' ? 'média' : S.triage.level;
+    $('triCount').textContent = String(S.merged.length);
+    $('triArea').textContent = pct(S.triage.damageFrac, 2);
+    $('triRej').textContent = pct(det.stats.rejectedFrac, 0);
+    var total = det.stats.ms + (S.sec && S.sec.det ? S.sec.det.stats.ms + (S.sec.reg ? S.sec.reg.ms : 0) : 0);
+    $('triMs').textContent = ms(total);
+
+    var tb = $('tblBody'); tb.textContent = '';
+    S.merged.forEach(function (e) {
+      var row = document.createElement('tr');
+      var td = function (txt, cls) { var c = document.createElement('td'); c.textContent = txt; if (cls) c.className = cls; row.appendChild(c); return c; };
+      td('#' + e.id, 'num');
+      var tcell = td('');
+      var dot = document.createElement('span'); dot.className = 'dot'; dot.style.background = colorFor(e);
+      tcell.appendChild(dot); tcell.appendChild(document.createTextNode(e.type));
+      td((e.cx * 100).toFixed(0) + '%, ' + (e.cy * 100).toFixed(0) + '%', 'num');
+      td(e.sources.length > 1 ? 'duas capturas' : e.sources[0]);
+      tb.appendChild(row);
+    });
+    $('tblWrap').hidden = S.merged.length === 0;
+    renderKV();
+  }
+
+  function deviceLabel() {
+    var ua = navigator.userAgent || '';
+    var m = ua.match(/\(([^)]+)\)/);
+    return m ? m[1] : ua.slice(0, 60);
+  }
+
+  function renderKV() {
+    var rows = [['Dispositivo', deviceLabel()]];
+    if (S.times.engineLoad) rows.push(['Carga do motor', ms(S.times.engineLoad)]);
+    if (S.ref) {
+      var m = S.ref.meta;
+      rows.push(['Original', m.origW + ' × ' + m.origH + ' px · ' + fmtBytes(m.bytes)]);
+      rows.push(['Processada', m.procW + ' × ' + m.procH + ' px']);
+      if (S.ref.ill) rows.push(['Luminância', S.ref.ill.meanL.toFixed(1)]);
+      if (S.times.illumination != null) rows.push(['Tempo da iluminação', ms(S.times.illumination)]);
+      if (S.ref.det) {
+        var t = S.ref.det.tiles;
+        rows.push(['Regiões avaliadas', t.evaluated + ' (' + t.rejected + ' descartadas)']);
+        rows.push(['Limiar de rachadura', S.ref.det.stats.crackThr.toFixed(1)]);
+        rows.push(['Tempo de detecção (ref.)', ms(S.ref.det.stats.ms)]);
+      }
+    }
+    if (S.sec && S.sec.reg) {
+      var r = S.sec.reg;
+      rows.push(['2ª captura', S.sec.meta.origW + ' × ' + S.sec.meta.origH + ' px · ' + fmtBytes(S.sec.meta.bytes)]);
+      rows.push(['Pontos ORB (ref. / 2ª)', r.kpRef + ' / ' + r.kpSec]);
+      rows.push(['Correspondências / inliers', r.good + ' / ' + r.inliers]);
+      rows.push(['Tempo do alinhamento', ms(r.ms)]);
+      if (S.sec.det) rows.push(['Tempo de detecção (2ª)', ms(S.sec.det.stats.ms)]);
+    }
+    var kv = $('kv'); kv.textContent = '';
+    rows.forEach(function (r) {
+      var dt = document.createElement('dt'), dd = document.createElement('dd');
+      dt.textContent = r[0]; dd.textContent = r[1]; kv.appendChild(dt); kv.appendChild(dd);
+    });
+  }
+
+  function buildReport() {
+    var rep = {
+      ferramenta: 'Triagem de Avarias (on-device, OpenCV.js)',
+      data: new Date().toISOString(),
+      dispositivo: navigator.userAgent,
+      parametros: S.P.params,
+      referencia: S.ref ? { meta: S.ref.meta, iluminacao: S.ref.ill, deteccao: S.ref.det ? S.ref.det.stats : null,
+        regioes: S.ref.det ? { avaliadas: S.ref.det.tiles.evaluated, candidatas: S.ref.det.tiles.candidates, descartadas: S.ref.det.tiles.rejected } : null } : null,
+      segundaCaptura: S.sec ? { meta: S.sec.meta,
+        alinhamento: S.sec.reg ? { ok: S.sec.reg.ok, pontosRef: S.sec.reg.kpRef, pontosSec: S.sec.reg.kpSec, correspondencias: S.sec.reg.good, inliers: S.sec.reg.inliers, ms: S.sec.reg.ms, homografia: S.sec.reg.H } : null,
+        deteccao: S.sec.det ? S.sec.det.stats : null } : null,
+      danos: (S.merged || []).map(function (e) { return { id: e.id, tipo: e.type, x: e.x, y: e.y, largura: e.w, altura: e.h, centroNormalizado: [+e.cx.toFixed(4), +e.cy.toFixed(4)], vistoEm: e.sources }; }),
+      triagem: S.triage,
+      observacao: 'Ferramenta de triagem; nao substitui a analise do profissional.'
+    };
+    return JSON.stringify(rep, null, 2);
+  }
+
+  function copyReport() {
+    var txt = buildReport(), fb = $('jsonFallback');
+    var fallback = function () { fb.value = txt; fb.hidden = false; fb.focus(); fb.select(); toast('Selecione e copie o texto abaixo'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(function () { toast('Relatório copiado'); }).catch(fallback);
+    } else fallback();
+  }
+
+  function makeMapImage() {
+    if (!S.ref || !S.ref.det) return;
+    var W = S.ref.canvas.width, H = S.ref.canvas.height, bar = Math.round(H * 0.11);
+    var c = document.createElement('canvas'); c.width = W; c.height = H + bar;
+    var ctx = c.getContext('2d');
+    paintTo(ctx, W, H, { damage: true, tiles: false, sec: false, alpha: 0 });
+    ctx.fillStyle = '#101514'; ctx.fillRect(0, H, W, bar);
+    var fs = Math.max(12, Math.round(bar * 0.26));
+    ctx.font = '500 ' + fs + 'px ' + css('--font-data'); ctx.textBaseline = 'middle';
+    var items = [[css('--c-both'), 'duas capturas'], [css('--c-normal'), 'só luz normal'], [css('--c-raking'), 'só 2ª captura']];
+    var x = 14, y1 = H + bar * 0.3, y2 = H + bar * 0.74, sz = Math.round(fs * 0.9);
+    items.forEach(function (it) {
+      ctx.strokeStyle = it[0]; ctx.lineWidth = 3; ctx.strokeRect(x, y1 - sz / 2, sz, sz);
+      ctx.fillStyle = '#e6eeec'; ctx.fillText(it[1], x + sz + 8, y1); x += sz + 8 + ctx.measureText(it[1]).width + 20;
+    });
+    var label = 'Prioridade de inspeção: ' + (S.triage.level === 'media' ? 'média' : S.triage.level) + '  ·  R rachadura  ·  C perda de cor';
+    ctx.fillStyle = '#9db0ab'; ctx.fillText(label, 14, y2);
+    $('mapImg').src = c.toDataURL('image/jpeg', 0.92);
+    $('mapOut').hidden = false;
+    if ($('mapOut').scrollIntoView) $('mapOut').scrollIntoView({ block: 'nearest' });
+  }
+
+  // ------------------------------------------------------------ eventos
+  function bindFile(id, handler) {
+    $(id).addEventListener('change', function (ev) { var f = ev.target.files && ev.target.files[0]; ev.target.value = ''; handler(f); });
+  }
+  bindFile('refCam', onReference); bindFile('refFile', onReference);
+  bindFile('secCam', onSecond); bindFile('secFile', onSecond);
+
+  $('override').addEventListener('click', async function () {
+    if (S.busy || !S.ref) return; S.busy = true; S.forced = true;
+    try { await analyzeReference(); } finally { S.busy = false; }
+  });
+  $('tglDamage').addEventListener('change', function (e) { S.view.damage = e.target.checked; drawView(); });
+  $('tglTiles').addEventListener('change', function (e) { S.view.tiles = e.target.checked; drawView(); });
+  $('tglSec').addEventListener('change', function (e) { S.view.sec = e.target.checked; drawView(); });
+  $('alpha').addEventListener('input', function (e) { S.view.alpha = e.target.value / 100; $('alphaVal').textContent = e.target.value + '%'; drawView(); });
+  $('sCrack').addEventListener('input', function (e) { S.P.params.crackSigma = parseFloat(e.target.value); $('sCrackVal').textContent = parseFloat(e.target.value).toFixed(1).replace('.', ',') + ' desvios'; });
+  $('sLoss').addEventListener('input', function (e) { S.P.params.lossThr = parseFloat(e.target.value); $('sLossVal').textContent = e.target.value; });
+  $('reanalyze').addEventListener('click', async function () {
+    if (S.busy || !S.ref || !S.ref.det) return; S.busy = true;
+    try { await analyzeReference(); toast('Análise atualizada'); } finally { S.busy = false; }
+  });
+  $('copyJson').addEventListener('click', copyReport);
+  $('makeImg').addEventListener('click', makeMapImage);
+
+  renderKV();
+  loadEngine();
+})();
+</script>
+</body>
+</html>

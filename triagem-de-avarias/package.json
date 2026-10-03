@@ -1,0 +1,17 @@
+{
+  "name": "triagem-de-avarias",
+  "version": "1.0.0",
+  "description": "Triagem de avarias em obras de arte, on-device no celular (OpenCV.js): iluminacao, rejeicao de regioes, deteccao e Condition Map com ORB",
+  "private": true,
+  "scripts": {
+    "build": "node build.js",
+    "test:pipeline": "node tests/test-pipeline.js",
+    "test:ui": "node tests/test-ui.js",
+    "test": "npm run test:pipeline && npm run test:ui"
+  },
+  "devDependencies": {
+    "@napi-rs/canvas": "^0.1.0",
+    "@techstark/opencv-js": "5.0.0-release.1",
+    "jsdom": "^26.0.0"
+  }
+}
