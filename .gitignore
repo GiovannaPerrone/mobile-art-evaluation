@@ -1,3 +1,6 @@
 node_modules/
 dist/
 tests/saida/
+
+# fotos do treino do modelo (nao publicar: o repositorio e publico)
+dataset/

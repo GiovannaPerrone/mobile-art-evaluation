@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rotular avarias</title>
+<style>
+  :root { --bg: #f4f4f1; --fg: #1b1d1c; --muted: #5d6662; --surface: #ffffff; --line: #cfd4d1; --accent: #0f766e; --accent-fg: #ffffff; --box: #e5391f; --box-sel: #f2b705; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #101514; --fg: #e6eeec; --muted: #9db0ab; --surface: #182120; --line: #2c3a38; --accent: #2dd4bf; --accent-fg: #06201d; --box: #ff6b52; --box-sel: #ffd84a; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .app { display: grid; grid-template-rows: auto 1fr auto; height: 100%; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--line); }
+  .bar.bottom { border-bottom: 0; border-top: 1px solid var(--line); }
+  button, label.btn { font: inherit; font-weight: 600; min-height: 40px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--fg); cursor: pointer; display: inline-flex; align-items: center; }
+  button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button:focus-visible, label.btn:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
+  input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .grow { flex: 1; min-width: 8px; }
+  .muted { color: var(--muted); }
+  .mono { font-variant-numeric: tabular-nums; font-family: ui-monospace, Consolas, monospace; }
+  #stage { position: relative; overflow: hidden; touch-action: none; background: #0b0f0e; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: #9db0ab; }
+  #empty[hidden] { display: none; }
+  #empty p { max-width: 46ch; }
+  label.check { display: inline-flex; gap: 6px; align-items: center; min-height: 40px; }
+  #msg { font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="bar">
+    <label class="btn">Abrir fotos<input type="file" id="fotos" accept="image/*" multiple></label>
+    <label class="btn">Importar rótulos<input type="file" id="importar" accept="application/json,.json"></label>
+    <label class="check muted" for="nomeArquivo">Arquivo:</label>
+    <input id="nomeArquivo" type="text" value="rotulos" size="16" aria-label="Nome do arquivo exportado, sem .json" style="min-height:40px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--fg);font:inherit">
+    <button id="exportar" type="button" disabled>Exportar rótulos</button>
+    <span class="grow"></span>
+    <span class="muted" id="msg"></span>
+  </div>
+
+  <div id="stage">
+    <canvas id="tela"></canvas>
+    <div id="empty"><p><strong>1.</strong> Toque em "Abrir fotos" e escolha as fotos da pasta <span class="mono">dataset/trabalho</span> (todas de uma vez).<br><br><strong>2.</strong> Desenhe uma caixa em cada área com dano. <strong>3.</strong> Marque "Revisada" ao terminar a foto e passe para a próxima.</p></div>
+  </div>
+
+  <div class="bar bottom">
+    <button id="modoDesenhar" type="button" class="on" title="Atalho: D">Desenhar</button>
+    <button id="modoMover" type="button" title="Atalho: M, ou segure Espaço">Mover</button>
+    <button id="apagar" type="button" disabled title="Atalho: Delete">Apagar caixa</button>
+    <button id="desfazer" type="button" disabled title="Atalho: Ctrl+Z">Desfazer</button>
+    <button id="ajustar" type="button" title="Atalho: F">Ajustar à tela</button>
+    <span class="muted">Tipo:</span>
+    <span id="tipos" role="group" aria-label="Tipo de dano da próxima caixa"></span>
+    <span class="grow"></span>
+    <label class="check"><input type="checkbox" id="revisada"> Revisada</label>
+    <button id="anterior" type="button" title="Atalho: seta esquerda">&larr;</button>
+    <span class="mono" id="posicao">0 / 0</span>
+    <button id="proxima" type="button" title="Atalho: seta direita">&rarr;</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var CHAVE = 'rotulos-avarias-v1';
+  var tela = $('tela'), ctx = tela.getContext('2d');
+
+  // Tipos de dano. 'avaria' e o tipo geral (usado nas fotos do steelbook e dos albuns).
+  // Caixas de arquivos antigos, sem tipo, valem como 'avaria'.
+  var TIPOS = [
+    { id: 'avaria', nome: 'Avaria', cor: '#ff3b30', tecla: '1' },
+    { id: 'rachadura', nome: 'Rachadura', cor: '#00d4ff', tecla: '2' },
+    { id: 'mancha', nome: 'Mancha', cor: '#ff2fd0', tecla: '3' },
+    { id: 'perda_de_tinta', nome: 'Perda de tinta', cor: '#ff9500', tecla: '4' }
+  ];
+  var tipoAtual = 'avaria';
+  function tipoDe(caixa) { return caixa.classe || 'avaria'; }
+  function corDoTipo(id) { for (var i = 0; i < TIPOS.length; i++) if (TIPOS[i].id === id) return TIPOS[i].cor; return '#ff3b30'; }
+
+  var fotos = [];            // { nome, imagem, largura, altura, caixas: [{x,y,w,h,classe}], revisada }
+  var atual = -1;
+  var vista = { escala: 1, ox: 0, oy: 0 };
+  var modo = 'desenhar';
+  var selecionada = -1;
+  var historico = [];        // pilha de desfazer: { foto, caixas copiadas }
+  var ponteiros = new Map();
+  var gesto = null;          // arrasto em andamento
+  var espaco = false;
+
+  // ------------------------------------------------------------ armazenamento local (so um conforto)
+  function lerSalvo() { try { return JSON.parse(localStorage.getItem(CHAVE) || '{}'); } catch (e) { return {}; } }
+  function salvarLocal() {
+    try {
+      var obj = {};
+      fotos.forEach(function (f) { obj[f.nome] = { caixas: f.caixas, revisada: f.revisada }; });
+      localStorage.setItem(CHAVE, JSON.stringify(obj));
+    } catch (e) { /* sem armazenamento: o botao Exportar continua valendo */ }
+  }
+  function aviso(texto) { $('msg').textContent = texto; }
+
+  // ------------------------------------------------------------ carregar fotos
+  $('fotos').addEventListener('change', function (ev) {
+    var arquivos = Array.prototype.slice.call(ev.target.files || []).sort(function (a, b) { return a.name.localeCompare(b.name); });
+    ev.target.value = '';
+    if (!arquivos.length) return;
+    var salvo = lerSalvo();
+    var pendentes = arquivos.length;
+    var lista = [];
+    arquivos.forEach(function (arq, i) {
+      var url = URL.createObjectURL(arq), img = new Image();
+      img.onload = function () {
+        var guardado = salvo[arq.name] || {};
+        lista[i] = { nome: arq.name, imagem: img, largura: img.naturalWidth, altura: img.naturalHeight, caixas: guardado.caixas || [], revisada: !!guardado.revisada };
+        if (--pendentes === 0) terminarCarga(lista);
+      };
+      img.onerror = function () { lista[i] = null; if (--pendentes === 0) terminarCarga(lista); };
+      img.src = url;
+    });
+  });
+  function terminarCarga(lista) {
+    fotos = lista.filter(Boolean);
+    $('empty').hidden = true;
+    $('exportar').disabled = !fotos.length;
+    irPara(0);
+    aviso(fotos.length + ' fotos abertas' + (Object.keys(lerSalvo()).length ? ' (rótulos salvos neste navegador foram recuperados)' : ''));
+  }
+
+  // ------------------------------------------------------------ importar e exportar
+  $('importar').addEventListener('change', function (ev) {
+    var arq = ev.target.files && ev.target.files[0]; ev.target.value = '';
+    if (!arq) return;
+    var leitor = new FileReader();
+    leitor.onload = function () {
+      try {
+        var dados = JSON.parse(leitor.result), usadas = 0;
+        (dados.fotos || []).forEach(function (d) {
+          var f = fotos.filter(function (x) { return x.nome === d.arquivo; })[0];
+          if (f) { f.caixas = d.caixas || []; f.revisada = !!d.revisada; usadas++; }
+        });
+        if (!fotos.length) aviso('Abra as fotos primeiro e depois importe os rótulos.');
+        else { aviso(usadas + ' fotos com rótulos importados'); salvarLocal(); irPara(Math.max(0, atual)); }
+      } catch (e) { aviso('Arquivo de rótulos inválido.'); }
+    };
+    leitor.readAsText(arq);
+  });
+  $('exportar').addEventListener('click', function () {
+    var dados = {
+      versao: 2, classe: 'avaria', classes: TIPOS.map(function (t) { return t.id; }),
+      fotos: fotos.map(function (f) {
+        return { arquivo: f.nome, largura: f.largura, altura: f.altura, revisada: f.revisada,
+          caixas: f.caixas.map(function (c) { return { x: Math.round(c.x), y: Math.round(c.y), w: Math.round(c.w), h: Math.round(c.h), classe: tipoDe(c) }; }) };
+      })
+    };
+    var nome = ($('nomeArquivo').value || 'rotulos').replace(/\.json$/i, '').replace(/[^\w\-.]+/g, '-') || 'rotulos';
+    var blob = new Blob([JSON.stringify(dados, null, 1)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = nome + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    var total = dados.fotos.reduce(function (s, f) { return s + f.caixas.length; }, 0);
+    aviso('Exportado: ' + total + ' caixas em ' + dados.fotos.length + ' fotos. Salve o arquivo ' + nome + '.json em dataset/.');
+  });
+
+  // ------------------------------------------------------------ navegacao
+  function foto() { return fotos[atual]; }
+  function irPara(i) {
+    if (!fotos.length) return;
+    atual = (i + fotos.length) % fotos.length; selecionada = -1; historico = [];
+    $('revisada').checked = foto().revisada;
+    ajustarVista(); atualizarInterface(); desenhar();
+  }
+  function atualizarInterface() {
+    $('posicao').textContent = (atual + 1) + ' / ' + fotos.length + ' · ' + (fotos[atual] ? fotos[atual].caixas.length : 0) + ' caixas';
+    $('apagar').disabled = selecionada < 0;
+    $('desfazer').disabled = !historico.length;
+    $('modoDesenhar').classList.toggle('on', modo === 'desenhar');
+    $('modoMover').classList.toggle('on', modo === 'mover');
+  }
+  $('anterior').addEventListener('click', function () { irPara(atual - 1); });
+  $('proxima').addEventListener('click', function () { irPara(atual + 1); });
+  $('revisada').addEventListener('change', function (e) { if (foto()) { foto().revisada = e.target.checked; salvarLocal(); } });
+  $('modoDesenhar').addEventListener('click', function () { modo = 'desenhar'; atualizarInterface(); });
+  $('modoMover').addEventListener('click', function () { modo = 'mover'; atualizarInterface(); });
+  $('ajustar').addEventListener('click', function () { ajustarVista(); desenhar(); });
+
+  // ------------------------------------------------------------ tipo de dano
+  // Escolher um tipo vale para as proximas caixas. Com uma caixa selecionada, troca o tipo dela.
+  function escolherTipo(id) {
+    tipoAtual = id;
+    if (foto() && selecionada >= 0) { guardarHistorico(); foto().caixas[selecionada].classe = id; salvarLocal(); }
+    montarTipos(); desenhar();
+  }
+  function montarTipos() {
+    var caixa = $('tipos'); caixa.innerHTML = '';
+    TIPOS.forEach(function (t) {
+      var b = document.createElement('button'); b.type = 'button';
+      b.textContent = t.tecla + ' ' + t.nome; b.title = 'Atalho: ' + t.tecla;
+      b.style.borderLeft = '8px solid ' + t.cor;
+      if (t.id === tipoAtual) b.classList.add('on');
+      b.addEventListener('click', function () { escolherTipo(t.id); });
+      caixa.appendChild(b);
+    });
+  }
+  montarTipos();
+
+  // ------------------------------------------------------------ edicao
+  function guardarHistorico() {
+    historico.push({ foto: atual, caixas: foto().caixas.map(function (c) { return { x: c.x, y: c.y, w: c.w, h: c.h, classe: c.classe }; }) });
+    if (historico.length > 100) historico.shift();
+  }
+  function apagarSelecionada() {
+    if (selecionada < 0 || !foto()) return;
+    guardarHistorico(); foto().caixas.splice(selecionada, 1); selecionada = -1;
+    salvarLocal(); atualizarInterface(); desenhar();
+  }
+  function desfazer() {
+    var h = historico.pop();
+    if (!h || h.foto !== atual) { historico = []; atualizarInterface(); return; }
+    foto().caixas = h.caixas; selecionada = -1;
+    salvarLocal(); atualizarInterface(); desenhar();
+  }
+  $('apagar').addEventListener('click', apagarSelecionada);
+  $('desfazer').addEventListener('click', desfazer);
+
+  // ------------------------------------------------------------ vista (zoom e deslocamento)
+  function tamanhoTela() {
+    var r = tela.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    var w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
+    if (tela.width !== w || tela.height !== h) { tela.width = w; tela.height = h; }
+    return { w: r.width, h: r.height, dpr: dpr };
+  }
+  function ajustarVista() {
+    if (!foto()) return;
+    var t = tamanhoTela();
+    vista.escala = Math.min(t.w / foto().largura, t.h / foto().altura);
+    vista.ox = (t.w - foto().largura * vista.escala) / 2;
+    vista.oy = (t.h - foto().altura * vista.escala) / 2;
+  }
+  function paraImagem(sx, sy) { return { x: (sx - vista.ox) / vista.escala, y: (sy - vista.oy) / vista.escala }; }
+  function aplicarZoom(fator, sx, sy) {
+    var nova = Math.max(0.05, Math.min(vista.escala * fator, 12));
+    var f = nova / vista.escala;
+    vista.ox = sx - (sx - vista.ox) * f; vista.oy = sy - (sy - vista.oy) * f; vista.escala = nova;
+  }
+
+  function desenhar() {
+    var t = tamanhoTela();
+    ctx.setTransform(t.dpr, 0, 0, t.dpr, 0, 0);
+    ctx.clearRect(0, 0, t.w, t.h);
+    var f = foto(); if (!f) return;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(f.imagem, vista.ox, vista.oy, f.largura * vista.escala, f.altura * vista.escala);
+    var corSel = '#ffffff';
+    f.caixas.forEach(function (c, i) { retangulo(c, i === selecionada ? corSel : corDoTipo(tipoDe(c)), i === selecionada ? 4 : 2); });
+    if (gesto && gesto.tipo === 'caixa') retangulo(gesto.caixa, corDoTipo(tipoAtual), 2, true);
+  }
+  function retangulo(c, cor, largura, tracejado) {
+    ctx.lineWidth = largura; ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    var x = c.x * vista.escala + vista.ox, y = c.y * vista.escala + vista.oy, w = c.w * vista.escala, h = c.h * vista.escala;
+    ctx.setLineDash(tracejado ? [6, 4] : []);
+    ctx.strokeRect(x - 1, y - 1, w + 2, h + 2);
+    ctx.strokeStyle = cor; ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
+  }
+  window.addEventListener('resize', function () { ajustarVista(); desenhar(); });
+
+  // ------------------------------------------------------------ ponteiro (mouse, toque, caneta)
+  function posicao(ev) { var r = tela.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; }
+  function caixaEm(ix, iy) {
+    var melhor = -1, menor = Infinity;
+    foto().caixas.forEach(function (c, i) {
+      if (ix >= c.x && ix <= c.x + c.w && iy >= c.y && iy <= c.y + c.h && c.w * c.h < menor) { menor = c.w * c.h; melhor = i; }
+    });
+    return melhor;
+  }
+  function distancia(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+  tela.addEventListener('pointerdown', function (ev) {
+    if (!foto()) return;
+    tela.setPointerCapture(ev.pointerId);
+    var p = posicao(ev); ponteiros.set(ev.pointerId, p);
+    if (ponteiros.size === 2) {                       // dois dedos: zoom e deslocamento
+      var pts = Array.from(ponteiros.values());
+      gesto = { tipo: 'pinca', dist: distancia(pts[0], pts[1]), cx: (pts[0].x + pts[1].x) / 2, cy: (pts[0].y + pts[1].y) / 2 };
+      return;
+    }
+    var mover = modo === 'mover' || espaco || ev.button === 1 || ev.button === 2;
+    if (mover) { gesto = { tipo: 'mover', x: p.x, y: p.y }; return; }
+    var im = paraImagem(p.x, p.y);
+    gesto = { tipo: 'caixa', x0: im.x, y0: im.y, sx: p.x, sy: p.y, caixa: { x: im.x, y: im.y, w: 0, h: 0 } };
+  });
+  tela.addEventListener('pointermove', function (ev) {
+    if (!ponteiros.has(ev.pointerId) || !gesto) return;
+    var p = posicao(ev); ponteiros.set(ev.pointerId, p);
+    if (gesto.tipo === 'pinca' && ponteiros.size >= 2) {
+      var pts = Array.from(ponteiros.values()), d = distancia(pts[0], pts[1]);
+      var cx = (pts[0].x + pts[1].x) / 2, cy = (pts[0].y + pts[1].y) / 2;
+      vista.ox += cx - gesto.cx; vista.oy += cy - gesto.cy;
+      aplicarZoom(d / gesto.dist, cx, cy);
+      gesto.dist = d; gesto.cx = cx; gesto.cy = cy; desenhar(); return;
+    }
+    if (gesto.tipo === 'mover') { vista.ox += p.x - gesto.x; vista.oy += p.y - gesto.y; gesto.x = p.x; gesto.y = p.y; desenhar(); return; }
+    if (gesto.tipo === 'caixa') {
+      var im = paraImagem(p.x, p.y);
+      gesto.caixa = { x: Math.min(gesto.x0, im.x), y: Math.min(gesto.y0, im.y), w: Math.abs(im.x - gesto.x0), h: Math.abs(im.y - gesto.y0) };
+      desenhar();
+    }
+  });
+  function terminar(ev) {
+    if (!ponteiros.has(ev.pointerId)) return;
+    var p = posicao(ev); ponteiros.delete(ev.pointerId);
+    var g = gesto;
+    if (ponteiros.size === 0) gesto = null;
+    if (!g || g.tipo !== 'caixa' || ev.type === 'pointercancel') { desenhar(); return; }
+    var arrastou = distancia({ x: g.sx, y: g.sy }, p) > 6;
+    if (!arrastou) {                                   // toque simples: seleciona a caixa sob o dedo
+      var im = paraImagem(p.x, p.y); selecionada = caixaEm(im.x, im.y);
+    } else {
+      var c = g.caixa, f = foto();
+      var x0 = Math.max(0, c.x), y0 = Math.max(0, c.y), x1 = Math.min(f.largura, c.x + c.w), y1 = Math.min(f.altura, c.y + c.h);
+      if (x1 - x0 >= 6 && y1 - y0 >= 6) {
+        guardarHistorico(); f.caixas.push({ x: x0, y: y0, w: x1 - x0, h: y1 - y0, classe: tipoAtual });
+        selecionada = -1; salvarLocal();   // a caixa nova nao fica selecionada: os numeros valem para a proxima
+      }
+    }
+    atualizarInterface(); desenhar();
+  }
+  tela.addEventListener('pointerup', terminar);
+  tela.addEventListener('pointercancel', terminar);
+  tela.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  tela.addEventListener('wheel', function (ev) {
+    if (!foto()) return; ev.preventDefault();
+    var p = posicao(ev); aplicarZoom(ev.deltaY < 0 ? 1.15 : 1 / 1.15, p.x, p.y); desenhar();
+  }, { passive: false });
+
+  // ------------------------------------------------------------ teclado
+  window.addEventListener('keydown', function (ev) {
+    if (ev.target && /INPUT|TEXTAREA/.test(ev.target.tagName) && ev.target.type !== 'checkbox') return;
+    var k = ev.key;
+    if (k === ' ') { espaco = true; ev.preventDefault(); }
+    else if (k >= '1' && k <= String(TIPOS.length)) { escolherTipo(TIPOS[Number(k) - 1].id); }
+    else if (k === 'd' || k === 'D') { modo = 'desenhar'; atualizarInterface(); }
+    else if (k === 'm' || k === 'M') { modo = 'mover'; atualizarInterface(); }
+    else if (k === 'f' || k === 'F') { ajustarVista(); desenhar(); }
+    else if (k === 'Delete' || k === 'Backspace') { apagarSelecionada(); }
+    else if ((ev.ctrlKey || ev.metaKey) && (k === 'z' || k === 'Z')) { ev.preventDefault(); desfazer(); }
+    else if (k === 'ArrowRight') { irPara(atual + 1); }
+    else if (k === 'ArrowLeft') { irPara(atual - 1); }
+    else if (k === '+' || k === '=') { var t = tamanhoTela(); aplicarZoom(1.25, t.w / 2, t.h / 2); desenhar(); }
+    else if (k === '-') { var t2 = tamanhoTela(); aplicarZoom(1 / 1.25, t2.w / 2, t2.h / 2); desenhar(); }
+  });
+  window.addEventListener('keyup', function (ev) { if (ev.key === ' ') espaco = false; });
+
+  tamanhoTela();
+})();
+</script>
+</body>
+</html>
