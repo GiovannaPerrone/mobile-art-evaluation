@@ -35,6 +35,12 @@
           <label class="chip"><input type="radio" name="mode" id="modeImpresso" value="impresso"><span>Impresso ou ilustração</span></label>
         </fieldset>
         <p class="muted small" id="modeHelp">Pintura procura rachaduras e perda de cor. Impresso ou ilustração (poster, steelbook, quadrinho) procura manchas escuras, como ferrugem e tinta solta, e ignora o desenho.</p>
+        <fieldset class="mode">
+          <legend>Detector adicional</legend>
+          <label class="chip"><input type="checkbox" id="useModel"><span>Modelo treinado (experimental)</span></label>
+        </fieldset>
+        <p class="muted small" id="modelHelp">Soma ao detector clássico um modelo aprendido (YOLO), treinado em pinturas de cavalete com perda de camada de tinta. Na primeira vez baixa cerca de 12 MB e leva alguns segundos por foto. As marcas do detector clássico não mudam: as do modelo aparecem em outra cor, com a letra A.</p>
+        <div class="status-line" id="modelStatus" role="status"></div>
         <div class="btn-row">
           <label class="btn primary" for="refCam" id="refCamBtn" aria-disabled="true">Fotografar obra</label>
           <label class="btn" for="refFile" id="refFileBtn" aria-disabled="true">Escolher da galeria</label>
@@ -76,6 +82,7 @@
           <span><i style="border-color: var(--c-both)"></i>luz normal e rasante</span>
           <span><i style="border-color: var(--c-normal)"></i>só luz normal</span>
           <span><i style="border-color: var(--c-raking)"></i>só luz rasante</span>
+          <span id="legModel" hidden><i style="border-color: var(--c-model)"></i>só o modelo treinado</span>
           <span class="mono" id="legendLetters">R rachadura · C perda de cor</span>
         </div>
         <div class="btn-row" id="mapBtnRow" hidden>
@@ -187,6 +194,13 @@
               </div>
               <p class="muted small">Contraste menor acha mais manchas, com mais falsos alarmes. Detalhe maior analisa mais área da peça, mas aceita regiões em que o desenho impresso se confunde com dano.</p>
             </div>
+            <div id="slidersModelo" hidden>
+              <div class="slider">
+                <label for="sModel">Confiança mínima do modelo: <span class="mono" id="sModelVal">0,10</span></label>
+                <input type="range" id="sModel" min="0.05" max="0.5" step="0.05" value="0.10">
+              </div>
+              <p class="muted small">Valores menores mostram mais marcas do modelo, com mais falsos alarmes. Mexer aqui não refaz a leitura do modelo: só filtra o que ele já achou.</p>
+            </div>
             <div class="btn-row"><button class="btn" id="reanalyze" type="button" disabled>Reanalisar</button></div>
           </div>
         </details>
@@ -206,7 +220,9 @@
 
 <!-- 1) pipeline de visao (OpenCV.js) -->
 <script src="js/pipeline.js"></script>
-<!-- 2) interface e fluxo do app (o motor OpenCV.js e carregado por aqui, via CDN) -->
+<!-- 2) modelo treinado (YOLO em ONNX). So e usado se a pessoa ligar a opcao; a biblioteca vem por CDN -->
+<script src="js/modelo.js"></script>
+<!-- 3) interface e fluxo do app (o motor OpenCV.js e carregado por aqui, via CDN) -->
 <script src="js/app.js"></script>
 </body>
 </html>

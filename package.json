@@ -7,12 +7,15 @@
     "build": "node build.js",
     "test:pipeline": "node tests/test-pipeline.js",
     "test:ui": "node tests/test-ui.js",
-    "test": "npm run test:pipeline && npm run test:ui",
-    "test:real": "node tests/real-foto.js"
+    "test": "npm run test:pipeline && npm run test:modelo && npm run test:ui",
+    "test:real": "node tests/real-foto.js",
+    "test:modelo": "node tests/test-modelo.js",
+    "test:modelo-foto": "node tests/modelo-foto.js"
   },
   "devDependencies": {
     "@napi-rs/canvas": "^0.1.0",
     "@techstark/opencv-js": "5.0.0-release.1",
-    "jsdom": "^26.0.0"
+    "jsdom": "^26.0.0",
+    "onnxruntime-web": "^1.30.0"
   }
 }

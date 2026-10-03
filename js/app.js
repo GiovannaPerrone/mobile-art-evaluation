@@ -3,7 +3,11 @@
   var $ = function (id) { return document.getElementById(id); };
   var MAXSIDE = 1280;
   var ENGINE_URL = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@5.0.0-release.1/dist/opencv.js';
-  var TYPE_LETTER = { 'rachadura': 'R', 'perda de cor': 'C', 'mancha': 'M' };
+  var TYPE_LETTER = { 'rachadura': 'R', 'perda de cor': 'C', 'mancha': 'M', 'avaria (modelo)': 'A' };
+  // Modelo treinado (YOLO, opcional): arquivo do repositorio e biblioteca de execucao no navegador
+  var MODEL_URL = 'models/yolo-A-pinturas.onnx';
+  var ORT_URL = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort.wasm.min.js';
+  var MODEL_SIDE = 2560;                     // escala em que o modelo foi treinado (lado maior)
 
   var S = {
     cv: null, P: null,
@@ -13,7 +17,8 @@
     shots: [], nextShotId: 1,              // fotos adicionais (detalhes e/ou luz rasante)
     merged: null, triage: null,
     view: { damage: true, tiles: false, sec: false, alpha: 0.5 },
-    forced: false, busy: false, times: {}
+    forced: false, busy: false, times: {},
+    model: { on: false, M: null, state: 'idle', conf: 0.10, loadMs: 0 }   // modelo treinado (experimental)
   };
 
   // ------------------------------------------------------------ utilidades
@@ -68,30 +73,137 @@
     document.head.appendChild(s);
   }
 
-  // ------------------------------------------------------------ leitura de imagem
-  function readImage(file) {
+  // ------------------------------------------------------------ modelo treinado (opcional, experimental)
+  function modelStatus(text, kind) {
+    var el = $('modelStatus'); el.textContent = text || '';
+    el.dataset.kind = kind || '';
+  }
+  function loadScript(src) {
     return new Promise(function (resolve, reject) {
-      var done = function (src, w, h, revoke) {
-        var scale = Math.min(1, MAXSIDE / Math.max(w, h));
-        var cw = Math.round(w * scale), ch = Math.round(h * scale);
-        var c = document.createElement('canvas'); c.width = cw; c.height = ch;
-        var ctx = c.getContext('2d', { willReadFrequently: true });
-        ctx.drawImage(src, 0, 0, cw, ch);
-        if (revoke) revoke();
-        resolve({ canvas: c, meta: { name: file.name, bytes: file.size, origW: w, origH: h, procW: cw, procH: ch } });
+      var sc = document.createElement('script'); sc.src = src; sc.async = true;
+      sc.onload = resolve; sc.onerror = function () { reject(new Error('biblioteca do modelo não carregou')); };
+      document.head.appendChild(sc);
+    });
+  }
+  /** Carrega a biblioteca e o arquivo do modelo na primeira vez. Devolve true se o modelo ficou pronto. */
+  async function ensureModel() {
+    var m = S.model;
+    if (m.M && m.M.pronto()) return true;
+    m.state = 'carregando';
+    try {
+      modelStatus('Verificando o arquivo do modelo...', 'warn');
+      var head = await fetch(MODEL_URL, { method: 'HEAD' });
+      if (!head.ok) throw new Error('arquivo do modelo não encontrado neste endereço');
+      modelStatus('Baixando a biblioteca de execução...', 'warn');
+      if (!window.ort) await loadScript(ORT_URL);
+      window.ort.env.wasm.proxy = false;
+      m.M = window.createModelo(window.ort);
+      var t0 = performance.now();
+      modelStatus('Carregando o modelo (cerca de 12 MB)...', 'warn');
+      await m.M.carregar(MODEL_URL);
+      m.loadMs = performance.now() - t0;
+      m.state = 'pronto';
+      modelStatus('Modelo pronto · ' + ms(m.loadMs), 'ok');
+      return true;
+    } catch (e) {
+      m.state = 'erro'; m.M = null;
+      modelStatus('Modelo indisponível: ' + errText(e) + '. O detector clássico continua funcionando.', 'crit');
+      return false;
+    }
+  }
+
+  /** Roda o modelo numa foto e devolve as caixas no quadro (em pixels) de uma imagem de largura destW. */
+  async function runModel(file, destW, label) {
+    var big = await readForModel(file), bigW = big.width;
+    try {
+      var res = await S.model.M.detectar(big, {
+        progresso: function (i, n) { modelStatus('Modelo treinado, ' + label + ': recorte ' + i + ' de ' + n, 'warn'); },
+        aguardar: tick
+      });
+      var k = destW / bigW;
+      return {
+        ms: res.ms, recortes: res.recortes,
+        boxes: res.caixas.map(function (c) { return { x: c.x * k, y: c.y * k, w: c.w * k, h: c.h * k, area: c.w * k * c.h * k, score: c.score }; })
       };
+    } finally { big.width = 0; big.height = 0; }
+  }
+  async function modelForReference() {
+    if (!S.model.on || !S.ref || S.ref.model) return;
+    S.ref.model = await runModel(S.ref.file, S.ref.canvas.width, 'referência');
+    S.times.modelRef = S.ref.model.ms;
+    modelStatus('Modelo pronto · referência: ' + S.ref.model.boxes.length + ' caixas candidatas em ' + ms(S.ref.model.ms), 'ok');
+  }
+  async function modelForShot(sh) {
+    if (!S.model.on || sh.model || !sh.reg || !sh.reg.ok || !sh.file) return;
+    var r = await runModel(sh.file, sh.mat.cols, 'foto adicional');
+    var W = S.ref.canvas.width, H = S.ref.canvas.height;
+    sh.model = { ms: r.ms, boxesRef: S.P.mapBoxes(r.boxes, sh.reg.H, W, H) };
+  }
+  async function modelForAll() {
+    await modelForReference();
+    for (var i = 0; i < S.shots.length; i++) await modelForShot(S.shots[i]);
+  }
+  /** Caixas do modelo prontas para unir: acima da confianca escolhida e com o centro dentro do recorte da peca. */
+  function modelGroups() {
+    if (!S.model.on || !S.ref || !S.ref.model) return [];
+    var W = S.ref.canvas.width, H = S.ref.canvas.height, r = cropRect(W, H), conf = S.model.conf;
+    var keep = function (b) {
+      var cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+      return b.score >= conf && cx >= r.x0 && cx <= r.x1 && cy >= r.y0 && cy <= r.y1;
+    };
+    var groups = [{ label: 'luz normal', boxes: S.ref.model.boxes.filter(keep) }];
+    S.shots.forEach(function (sh) {
+      if (sh.state === 'ok' && sh.model) groups.push({ label: setLabel(sh.set), boxes: sh.model.boxesRef.filter(keep) });
+    });
+    return groups;
+  }
+  function modelOnly(e) { return e.motores && e.motores.length === 1 && e.motores[0] === 'modelo'; }
+  function motorText(e) {
+    var m = e.motores || ['classico'];
+    return m.map(function (x) { return x === 'modelo' ? 'modelo' : 'clássico'; }).join(' e ');
+  }
+  function syncModelUI() {
+    $('slidersModelo').hidden = !S.model.on;
+    $('legModel').hidden = !S.model.on;
+  }
+
+  // ------------------------------------------------------------ leitura de imagem
+  /** Decodifica o arquivo (com a rotacao do EXIF) e entrega a fonte, o tamanho original e como liberar. */
+  function decodeFile(file) {
+    return new Promise(function (resolve, reject) {
       if (window.createImageBitmap) {
         createImageBitmap(file, { imageOrientation: 'from-image' }).then(function (bmp) {
-          done(bmp, bmp.width, bmp.height, function () { if (bmp.close) bmp.close(); });
+          resolve({ src: bmp, w: bmp.width, h: bmp.height, free: function () { if (bmp.close) bmp.close(); } });
         }).catch(function () { viaImg(); });
       } else viaImg();
       function viaImg() {
         var url = URL.createObjectURL(file), img = new Image();
-        img.onload = function () { done(img, img.naturalWidth, img.naturalHeight, function () { URL.revokeObjectURL(url); }); };
+        img.onload = function () { resolve({ src: img, w: img.naturalWidth, h: img.naturalHeight, free: function () { URL.revokeObjectURL(url); } }); };
         img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('Não foi possível abrir a imagem')); };
         img.src = url;
       }
     });
+  }
+  function drawScaled(dec, side, allowUp) {
+    var scale = side / Math.max(dec.w, dec.h);
+    if (!allowUp) scale = Math.min(1, scale);
+    var cw = Math.max(1, Math.round(dec.w * scale)), ch = Math.max(1, Math.round(dec.h * scale));
+    var c = document.createElement('canvas'); c.width = cw; c.height = ch;
+    var ctx = c.getContext('2d', { willReadFrequently: true });
+    if (scale !== 1) { ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; }
+    ctx.drawImage(dec.src, 0, 0, cw, ch);
+    return c;
+  }
+  function readImage(file) {
+    return decodeFile(file).then(function (dec) {
+      var c = drawScaled(dec, MAXSIDE, false);
+      dec.free();
+      return { canvas: c, meta: { name: file.name, bytes: file.size, origW: dec.w, origH: dec.h, procW: c.width, procH: c.height } };
+    });
+  }
+  /** A foto na escala do modelo (lado maior = 2560 px, ampliada se for menor). Quem chama libera o canvas. */
+  function readForModel(file) {
+    return decodeFile(file).then(function (dec) { var c = drawScaled(dec, MODEL_SIDE, true); dec.free(); return c; });
   }
   function canvasToMat(canvas) {
     var d = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height);
@@ -161,6 +273,7 @@
     resetShots();
     if (S.ref) { freeMat(S.ref.mat); if (S.ref.det) freeMat(S.ref.det.mask); }
     S.ref = null; S.forced = false; S.merged = null; S.triage = null;
+    modelStatus(S.model.state === 'pronto' ? 'Modelo pronto' : '', S.model.state === 'pronto' ? 'ok' : '');
     enableShots(false); $('overrideRow').hidden = true; $('copyJson').disabled = true; $('reanalyze').disabled = true;
     $('cropBox').hidden = true;
   }
@@ -177,7 +290,7 @@
       var img = await readImage(file);
       var t0 = performance.now();
       var mat = canvasToMat(img.canvas);
-      S.ref = { mat: mat, canvas: img.canvas, meta: img.meta, ill: null, det: null };
+      S.ref = { mat: mat, canvas: img.canvas, meta: img.meta, ill: null, det: null, file: file, model: null };
       var ill = S.P.checkIllumination(mat);
       S.times.illumination = performance.now() - t0;
       S.ref.ill = ill;
@@ -208,7 +321,6 @@
     var roi = cropMask(S.ref.canvas.width, S.ref.canvas.height);
     try { S.ref.det = S.P.detect(S.ref.mat, roi, { mode: S.mode }); } finally { freeMat(roi); }
     S.times.detectRef = S.ref.det.stats.ms;
-    setPill($('refPill'), 'ok', 'analisada');
     $('refStatus').textContent = S.ref.meta.origW + ' × ' + S.ref.meta.origH + ' px (' + fmtBytes(S.ref.meta.bytes) + '), processada em ' + S.ref.meta.procW + ' × ' + S.ref.meta.procH + ' px.';
     $('overrideRow').hidden = true;
     enableShots(true); $('reanalyze').disabled = false; $('copyJson').disabled = false;
@@ -216,7 +328,14 @@
       if (S.shots[i].reg && S.shots[i].reg.ok) await analyzeShot(S.shots[i]);
     }
     rebuildMerged();
-    drawView(); renderTriage(); renderShotList();
+    drawView(); renderTriage(); renderShotList();      // o resultado do detector classico ja aparece
+    if (S.model.on) {
+      setPill($('refPill'), 'warn', 'modelo treinado');
+      try { await modelForAll(); } catch (e) { modelFailed(e); }
+      rebuildMerged();
+      drawView(); renderTriage(); renderShotList();
+    }
+    setPill($('refPill'), 'ok', 'analisada');
   }
 
   // ------------------------------------------------------------ fotos adicionais
@@ -225,7 +344,7 @@
     S.busy = true;
     try {
       for (var i = 0; i < files.length; i++) {
-        var sh = { id: S.nextShotId++, set: set, mat: null, meta: null, reg: null, scale: 1, det: null, refMask: null, refBoxes: [], warpedCanvas: null, state: 'lendo', msg: '' };
+        var sh = { id: S.nextShotId++, set: set, file: files[i], model: null, mat: null, meta: null, reg: null, scale: 1, det: null, refMask: null, refBoxes: [], warpedCanvas: null, state: 'lendo', msg: '' };
         S.shots.push(sh);
         renderShotList(); await tick();
         try {
@@ -242,6 +361,7 @@
             sh.scale = S.P.homographyScale(reg.H);
             sh.state = 'detectando'; renderShotList(); await tick();
             await analyzeShot(sh);
+            if (S.model.on) { try { await modelForShot(sh); } catch (e) { modelFailed(e); } }
             sh.state = 'ok';
           }
         } catch (e) { sh.state = 'falhou'; sh.msg = errText(e); }
@@ -319,11 +439,20 @@
     S.merged = S.P.mergeAll(S.ref.det.boxes, okShots.map(function (s) { return { label: setLabel(s.set), boxes: s.refBoxes }; }), W, H);
     var frac = S.ref.det.stats.damageFrac;
     okShots.forEach(function (s) { frac = Math.max(frac, s.det.stats.damageFrac); });
+    var groups = modelGroups();
+    if (groups.length) {
+      S.P.addModelBoxes(S.merged, groups, W, H);
+      // area das marcas que so o modelo achou entra na area afetada da triagem
+      var extra = 0;
+      S.merged.forEach(function (e) { if (modelOnly(e)) extra += e.w * e.h; });
+      frac += extra / (W * H);
+    }
     S.triage = S.P.triage(frac, S.merged.length, S.mode);
   }
 
   // ------------------------------------------------------------ desenho
   function colorFor(e) {
+    if (modelOnly(e)) return css('--c-model');
     if (e.sources.length > 1) return css('--c-both');
     return e.sources[0] === 'luz normal' ? css('--c-normal') : css('--c-raking');
   }
@@ -359,7 +488,7 @@
         var pad = lw * 2, x = e.x - pad, y = e.y - pad, w = e.w + pad * 2, h = e.h + pad * 2;
         ctx.lineWidth = lw + 3; ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.strokeRect(x, y, w, h);
         ctx.lineWidth = lw; ctx.strokeStyle = colorFor(e); ctx.strokeRect(x, y, w, h);
-        var label = '#' + e.id + ' ' + (TYPE_LETTER[e.type] || '?');
+        var label = '#' + e.id + ' ' + (TYPE_LETTER[e.type] || '?') + (e.motores && e.motores.length > 1 ? '+A' : '');
         var tw = ctx.measureText(label).width + 8, th = Math.max(13, Math.round(W / 55)) + 6;
         var ly = y - th >= 0 ? y - th : y, lx = Math.max(0, Math.min(x, W - tw));
         ctx.fillStyle = colorFor(e); ctx.fillRect(lx, ly, tw, th);
@@ -421,7 +550,7 @@
       var dot = document.createElement('span'); dot.className = 'dot'; dot.style.background = colorFor(e);
       tcell.appendChild(dot); tcell.appendChild(document.createTextNode(e.type));
       td((e.cx * 100).toFixed(0) + '%, ' + (e.cy * 100).toFixed(0) + '%', 'num');
-      td(e.sources.length > 1 ? 'luz normal e rasante' : e.sources[0]);
+      td((e.sources.length > 1 ? 'luz normal e rasante' : e.sources[0]) + (S.model.on ? ' · ' + motorText(e) : ''));
       tb.appendChild(row);
     });
     $('tblWrap').hidden = S.merged.length === 0;
@@ -438,6 +567,10 @@
     var rows = [['Dispositivo', deviceLabel()]];
     if (S.times.engineLoad) rows.push(['Carga do motor', ms(S.times.engineLoad)]);
     rows.push(['Tipo de obra', S.mode === 'impresso' ? 'impresso / ilustração' : 'pintura']);
+    if (S.model.on) {
+      rows.push(['Modelo treinado', 'ativo · confiança mínima ' + fmtNum(S.model.conf, 2) + (S.model.loadMs ? ' · carga ' + ms(S.model.loadMs) : '')]);
+      if (S.ref && S.ref.model) rows.push(['Modelo: tempo / caixas candidatas (ref.)', ms(S.ref.model.ms) + ' / ' + S.ref.model.boxes.length]);
+    }
     if (S.ref) {
       var m = S.ref.meta;
       rows.push(['Original', m.origW + ' × ' + m.origH + ' px · ' + fmtBytes(m.bytes)]);
@@ -483,7 +616,9 @@
           alinhamento: sh.reg ? { ok: sh.reg.ok, pontosRef: sh.reg.kpRef, pontosFoto: sh.reg.kpSec, correspondencias: sh.reg.good, inliers: sh.reg.inliers, ms: sh.reg.ms, homografia: sh.reg.H } : null,
           deteccao: sh.det ? sh.det.stats : null };
       }),
-      danos: (S.merged || []).map(function (e) { return { id: e.id, tipo: e.type, x: e.x, y: e.y, largura: e.w, altura: e.h, centroNormalizado: [+e.cx.toFixed(4), +e.cy.toFixed(4)], vistoEm: e.sources }; }),
+      modeloTreinado: S.model.on ? { ativo: true, arquivo: MODEL_URL, confiancaMinima: S.model.conf, experimental: true,
+        referencia: S.ref && S.ref.model ? { ms: S.ref.model.ms, caixasCandidatas: S.ref.model.boxes.length } : null } : { ativo: false },
+      danos: (S.merged || []).map(function (e) { return { id: e.id, tipo: e.type, x: e.x, y: e.y, largura: e.w, altura: e.h, centroNormalizado: [+e.cx.toFixed(4), +e.cy.toFixed(4)], vistoEm: e.sources, achadoPor: e.motores || ['classico'], confiancaModelo: e.scoreModelo != null ? +e.scoreModelo.toFixed(3) : undefined }; }),
       triagem: S.triage,
       observacao: 'Ferramenta de triagem; nao substitui a analise do profissional.'
     };
@@ -508,6 +643,7 @@
     var fs = Math.max(12, Math.round(bar * 0.26));
     ctx.font = '500 ' + fs + 'px ' + css('--font-data'); ctx.textBaseline = 'middle';
     var items = [[css('--c-both'), 'normal e rasante'], [css('--c-normal'), 'só luz normal'], [css('--c-raking'), 'só luz rasante']];
+    if (S.model.on) items.push([css('--c-model'), 'modelo treinado (A)']);
     var x = 14, y1 = H + bar * 0.3, y2 = H + bar * 0.74, sz = Math.round(fs * 0.9);
     items.forEach(function (it) {
       ctx.strokeStyle = it[0]; ctx.lineWidth = 3; ctx.strokeRect(x, y1 - sz / 2, sz, sz);
@@ -530,7 +666,7 @@
     $('sDetail').value = p.printDetailMax; $('sDetailVal').textContent = Math.round(p.printDetailMax * 100) + '%';
     $('slidersPintura').hidden = S.mode !== 'pintura';
     $('slidersImpresso').hidden = S.mode !== 'impresso';
-    $('legendLetters').textContent = S.mode === 'impresso' ? 'M mancha escura' : 'R rachadura · C perda de cor';
+    $('legendLetters').textContent = (S.mode === 'impresso' ? 'M mancha escura' : 'R rachadura · C perda de cor') + (S.model.on ? ' · A avaria (modelo)' : '');
   }
 
   async function reanalyzeAll(msg) {
@@ -577,6 +713,39 @@
   $('sDark').addEventListener('input', function (e) { S.P.params.printDarkThr = parseFloat(e.target.value); $('sDarkVal').textContent = e.target.value; });
   $('sDetail').addEventListener('input', function (e) { S.P.params.printDetailMax = parseFloat(e.target.value); $('sDetailVal').textContent = Math.round(parseFloat(e.target.value) * 100) + '%'; });
   $('reanalyze').addEventListener('click', function () { reanalyzeAll('Análise atualizada'); });
+
+  // modelo treinado (experimental): liga e desliga sem tocar no detector classico
+  function modelFailed(e) {
+    S.model.on = false; $('useModel').checked = false; syncModelUI(); syncSliders();
+    modelStatus('Falha ao rodar o modelo: ' + errText(e) + '. Seguindo só com o detector clássico.', 'crit');
+  }
+  function refreshAfterModel() {
+    if (!S.ref || !S.ref.det) return;
+    rebuildMerged(); drawView(); renderTriage(); renderShotList();
+  }
+  $('useModel').addEventListener('change', async function (e) {
+    var want = e.target.checked;
+    if (S.busy) { e.target.checked = !want; toast('Aguarde a análise terminar'); return; }
+    S.busy = true;
+    try {
+      if (want) {
+        e.target.disabled = true;
+        var ok = await ensureModel();
+        e.target.disabled = false;
+        if (!ok) { e.target.checked = false; return; }
+        S.model.on = true; syncModelUI(); syncSliders();
+        if (S.ref && S.ref.det) { await modelForAll(); refreshAfterModel(); toast('Modelo treinado ligado'); }
+      } else {
+        S.model.on = false; syncModelUI(); syncSliders();
+        modelStatus(S.model.state === 'pronto' ? 'Modelo pronto (desligado)' : '', S.model.state === 'pronto' ? 'ok' : '');
+        refreshAfterModel();
+      }
+    } catch (err) { modelFailed(err); } finally { e.target.disabled = false; S.busy = false; }
+  });
+  $('sModel').addEventListener('input', function (e) {
+    S.model.conf = parseFloat(e.target.value); $('sModelVal').textContent = fmtNum(S.model.conf, 2);
+    refreshAfterModel();
+  });
   $('copyJson').addEventListener('click', copyReport);
   $('makeImg').addEventListener('click', makeMapImage);
 

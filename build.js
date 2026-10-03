@@ -8,6 +8,7 @@ function buildSingleFile() {
   let html = read('index.html');
   html = html.replace('<link rel="stylesheet" href="css/style.css">', () => '<style>\n' + read('css/style.css') + '</style>');
   html = html.replace('<script src="js/pipeline.js"></script>', () => '<script>\n' + read('js/pipeline.js') + '</script>');
+  html = html.replace('<script src="js/modelo.js"></script>', () => '<script>\n' + read('js/modelo.js') + '</script>');
   html = html.replace('<script src="js/app.js"></script>', () => '<script>\n' + read('js/app.js') + '</script>');
   return html;
 }

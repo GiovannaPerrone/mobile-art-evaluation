@@ -8,7 +8,7 @@ Web app de **triagem de avarias em obras de arte**, de baixo custo, para museus 
 
 Princípio central, que vale para todo texto, interface e código: **a ferramenta nunca substitui o profissional** (restaurador, museólogo). Ela só prioriza a fila de inspeção e poupa tempo na triagem inicial.
 
-Prazo da demonstração: terça-feira, 06/10/2026. Precisa funcionar no celular (Samsung Galaxy Z Flip 7).
+Prazo da demonstração: terça-feira, 06/10/2026. Precisa funcionar no celular (Galaxy A57 e iPhone).
 
 ## Como funciona
 
@@ -19,7 +19,9 @@ Página estática, sem backend. Tudo roda no navegador do celular (on-device). O
 | `index.html` | Marcação da tela |
 | `css/style.css` | Aparência, tema claro e escuro (tokens em `:root`) |
 | `js/pipeline.js` | Visão computacional (sem DOM). Funciona no navegador e no Node |
+| `js/modelo.js` | Modelo treinado (YOLOv8n ONNX) com onnxruntime-web, sem DOM. Recortes de 640 px, NMS |
 | `js/app.js` | Interface: leitura das fotos, botões, desenho do mapa, relatório JSON |
+| `models/yolo-A-pinturas.onnx` | Modelo treinado (12 MB), carregado só se a opção experimental for ligada |
 | `build.js` | Gera `dist/triagem-de-avarias.html` (arquivo único). Não edite o `dist/` à mão |
 | `tests/` | Testes com imagens sintéticas (Node + jsdom) |
 
@@ -37,19 +39,21 @@ Todos os limiares ficam em `P.params`, no topo de `createPipeline`.
 
 ## Estado atual e decisões
 
-- O detector é de **visão clássica**. Ainda **não há YOLO**. O artigo cita YOLO leve, então: ou o modelo é encaixado, ou o texto do artigo é ajustado (YOLO como trabalho futuro).
-- Plano do YOLO: `yolov8n` ou `yolo11n`, 2 classes (`rachadura`, `perda_de_cor`), treinado no Google Colab, exportado para ONNX e executado no navegador com `onnxruntime-web`. As caixas do YOLO entram no lugar da etapa de detecção 2b; o resto do pipeline continua igual.
-- Datasets candidatos (todos licença não comercial, citar a fonte):
-  - ArtInsight (pinturas de cavalete, polígonos JSON, perda de camada de tinta): Zenodo, DOI 10.5281/zenodo.8429814
-  - Heritage Cracks (paredes históricas, já em formato YOLO, classe "cracks"): Mendeley Data, DOI 10.17632/b32hyvv2nn.3
-  - MuralDH (murais, máscaras PNG): github.com/tearsheaven/MuralDH
-- Download e treino são feitos pela usuária (o ambiente do Claude não acessa esses sites). Decisão no domingo: se não houver modelo bom, manter o detector clássico.
+- O motor principal e o padrão é o **detector clássico** (OpenCV.js). Ele também é o plano B se o modelo não carregar.
+- **YOLO integrado como modo experimental** ("Detector adicional" > "Modelo treinado (experimental)", desligado por padrão). YOLOv8n de uma classe ("avaria"), exportado para ONNX e executado com `onnxruntime-web` 1.30.0 (WASM, CDN jsDelivr). A foto vai a 2560 px no lado maior e é percorrida em recortes de 640 px com passo 480 (mesma escala do treino); NMS 0,45; confiança padrão 0,10 (slider). As caixas só do modelo aparecem em violeta com a letra A; as que o detector clássico também achou ganham o campo `motores` com os dois. Primeiro uso baixa ~12 MB; ~8 s por foto no Chromium headless, o celular deve ser mais lento.
+- Modelos treinados no Colab (`tools/` tem os scripts de dataset e avaliação; `dataset/` não vai para o git):
+  - **A** (pinturas, ArtInsight + rótulos da autora; 142 treino/9 val): é o que está no app. Melhor em dentro do domínio (perda de tinta em pinturas ArtInsight, 42/165 polígonos tocados a conf 0,10), quase silencioso em álbuns. **Não generaliza** para pinturas do Met nem para a viseira de metal.
+  - **B** (A + steelbook): só ajuda na viseira de metal e inunda os álbuns em confiança baixa. Não está no app.
+  - Combinar A com o clássico dá ganho modesto (51/165); os dois quase não se sobrepõem.
+- Só o modelo A vai para o git (`models/yolo-A-pinturas.onnx`). O B e o modelo antigo ficam fora.
+- Licenças: ArtInsight CC-BY-4.0 (Zenodo 15640972 e 8429815), Met Open Access CC0, Heritage Cracks CC BY-NC 4.0, MaskCLP. O repositório é público: citar as fontes.
 - O artigo descreve um sensor de luz ambiente, mas o navegador não dá acesso a ele. O app usa a luminância da própria foto. O texto da seção II precisa refletir isso.
 - Ignorar do artigo tudo a partir da "Semana 7" (é template de outro grupo, sobre mochila antifurto).
 
 ## Limitações conhecidas
 
-- Modo pintura: testado só com imagens sintéticas (2 a 3 falsos positivos por imagem). Em arte impressa ele não serve.
+- Modo pintura clássico: testado só com imagens sintéticas e poucas pinturas reais (6 a 10 de 165 polígonos ArtInsight tocados). Em arte impressa ele não serve.
+- Modelo treinado: conjuntos de teste minúsculos e gabarito incompleto; os testes do ArtInsight são do mesmo dataset do treino; rachaduras rotuladas em áreas largas; imagens do Met ampliadas. Os números servem como indício, não como métrica final. Fotos do modelo anotadas pela autora, não por especialistas.
 - Modo impresso: calibrado em uma peça só (steelbook de Cyberpunk 2077 da Giovanna, 7 áreas de dano circuladas por ela). Nessa peça: 49 manchas, as 7 áreas com ao menos uma marcação, ~75% da área descartada por detalhe, ~0,3 s no Node. A foto de teste não está no repositório. Rodar com `node tests/real-foto.js`.
 - A luz rasante não filtrou falso positivo na peça de teste (sem sombras de relevo visíveis; a diferença entre fotos só destacou traços do desenho). Serve como cobertura extra.
 - Rachaduras encostadas na borda da foto podem virar falso positivo.
@@ -60,7 +64,8 @@ Todos os limiares ficam em `P.params`, no topo de `createPipeline`.
 
 ```
 npm install        # uma vez
-npm test           # test:pipeline + test:ui
+npm test           # test:pipeline + test:modelo + test:ui (o de inferência pula se faltar o .onnx)
+node tests/modelo-foto.js foto.jpg   # classico + modelo numa foto real
 node tests/real-foto.js foto.jpg [rotulos.png]   # foto real, modo impresso
 npm run build      # gera dist/triagem-de-avarias.html
 ```

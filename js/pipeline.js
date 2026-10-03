@@ -496,7 +496,7 @@
         const x0 = Math.max(0, Math.floor(Math.min.apply(null, xs))), y0 = Math.max(0, Math.floor(Math.min.apply(null, ys)));
         const x1 = Math.min(refW, Math.ceil(Math.max.apply(null, xs))), y1 = Math.min(refH, Math.ceil(Math.max.apply(null, ys)));
         if (x1 - x0 < 2 || y1 - y0 < 2) return;
-        out.push({ x: x0, y: y0, w: x1 - x0, h: y1 - y0, area: b.area * s2, type: b.type });
+        out.push({ x: x0, y: y0, w: x1 - x0, h: y1 - y0, area: b.area * s2, type: b.type, score: b.score });
       });
       return out;
     };
@@ -525,7 +525,7 @@
      * Cada entrada diz em quais capturas o dano apareceu (confirmacao cruzada).
      */
     P.mergeAll = function (refBoxes, shots, W, H) {
-      const entries = refBoxes.map((b) => ({ ...b, sources: ['luz normal'], seenIn: 1 }));
+      const entries = refBoxes.map((b) => ({ ...b, sources: ['luz normal'], seenIn: 1, motores: ['classico'] }));
       shots.forEach((sh) => {
         sh.boxes.forEach((b) => {
           let match = -1, best = 0.05;
@@ -534,13 +534,42 @@
             const e = entries[match];
             if (e.sources.indexOf(sh.label) < 0) e.sources.push(sh.label);
             e.seenIn++;
-          } else entries.push({ ...b, sources: [sh.label], seenIn: 1 });
+          } else entries.push({ ...b, sources: [sh.label], seenIn: 1, motores: ['classico'] });
         });
       });
+      numerar(entries, W, H);
+      return entries;
+    };
+
+    function numerar(entries, W, H) {
       entries.forEach((e, idx) => {
         e.id = idx + 1;
         e.cx = (e.x + e.w / 2) / W; e.cy = (e.y + e.h / 2) / H; // coordenadas normalizadas na obra
       });
+    }
+
+    /**
+     * Acrescenta as caixas do modelo treinado (YOLO) as entradas ja unidas do detector classico.
+     * groups: [{ label: 'luz normal' | 'luz rasante', boxes: [{ x, y, w, h, area, score }] }], caixas no quadro da referencia.
+     * Caixa que cai em cima de uma entrada existente (IoU > 0,05) so marca que o modelo tambem viu aquilo;
+     * as demais viram entradas novas do tipo 'avaria (modelo)'. Cada entrada traz em 'motores' quem a achou.
+     * Muda 'entries' no lugar e devolve a mesma lista.
+     */
+    P.addModelBoxes = function (entries, groups, W, H) {
+      entries.forEach((e) => { if (!e.motores) e.motores = ['classico']; });
+      groups.forEach((g) => {
+        g.boxes.forEach((b) => {
+          let match = -1, best = 0.05;
+          entries.forEach((e, j) => { const v = iou(e, b); if (v > best) { best = v; match = j; } });
+          if (match >= 0) {
+            const e = entries[match];
+            if (e.motores.indexOf('modelo') < 0) e.motores.push('modelo');
+            if (e.sources.indexOf(g.label) < 0) e.sources.push(g.label);
+            e.scoreModelo = Math.max(e.scoreModelo || 0, b.score || 0);
+          } else entries.push({ ...b, type: 'avaria (modelo)', sources: [g.label], seenIn: 1, motores: ['modelo'], scoreModelo: b.score || 0 });
+        });
+      });
+      numerar(entries, W, H);
       return entries;
     };
 
