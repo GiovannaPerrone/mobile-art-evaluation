@@ -161,6 +161,43 @@ function check(cond, label) { if (!cond) throw new Error('verificacao falhou: ' 
   const jsonTxt = $('jsonFallback').value;
   const rep = JSON.parse(jsonTxt);
   console.log('6. relatorio JSON ok: fotos adicionais =', rep.fotosAdicionais.length, '| tipo =', rep.tipoDeObra, '| danos =', rep.danos.length, '| triagem =', rep.triagem.level, '| chaves =', Object.keys(rep).join(','));
+
+  // 7. comparar modelos: o arquivo .onnx nao existe no jsdom, entao troca a biblioteca por uma falsa que devolve caixas conhecidas
+  check($('cmpRun') && !$('cmpRun').disabled, 'botao de comparar habilitado com a referencia carregada');
+  let instancia = 0;
+  const listas = [
+    [{ x: 800, y: 500, w: 200, h: 200, score: 0.90 }, { x: 900, y: 700, w: 300, h: 200, score: 0.07 }],                        // A: 1 acima de 0,10 (a de 0,07 ja nem entra pelo limiar do app)
+    [{ x: 800, y: 500, w: 200, h: 200, score: 0.60 }, { x: 1500, y: 300, w: 120, h: 120, score: 0.20 }, { x: 2000, y: 1500, w: 100, h: 100, score: 0.12 }],   // C2: 3
+    [{ x: 800, y: 500, w: 200, h: 200, score: 0.80 }, { x: 600, y: 600, w: 150, h: 150, score: 0.40 }, { x: 1500, y: 300, w: 120, h: 120, score: 0.30 }, { x: 2000, y: 1500, w: 100, h: 100, score: 0.15 }, { x: 1200, y: 900, w: 90, h: 90, score: 0.11 }]   // C4: 5
+  ];
+  window.fetch = async () => ({ ok: true });
+  window.ort = { env: { wasm: {} } };
+  window.createModelo = () => {
+    const minha = listas[instancia++];
+    return { carregar: async () => ({}), pronto: () => true, detectar: async () => ({ caixas: minha.filter((c) => c.score >= 0.05), recortes: 20, ms: 10 + instancia }) };
+  };
+  $('cmpRun').click();
+  await waitFor(() => /comparado|incompleto/.test($('cmpPill').textContent), 'comparacao dos modelos');
+  const linhasCmp = [...window.document.querySelectorAll('#cmpBody tr')].map((r) => [...r.children].map((c) => c.textContent));
+  linhasCmp.forEach((r) => console.log('7. ', r.join(' | ')));
+  check(linhasCmp.length === 3, 'tres modelos na tabela');
+  check($('cmpPill').textContent === 'comparado', 'etiqueta "comparado"');
+  check(linhasCmp[0][1] === '1' && linhasCmp[1][1] === '3' && linhasCmp[2][1] === '5', 'caixas por modelo em confianca 0,10: ' + linhasCmp.map((r) => r[1]).join(','));
+  check($('cmpRun').disabled, 'botao desabilitado depois de comparar');
+  check(window.document.querySelectorAll('#cmpChips input').length === 3, 'tres chips');
+  // subir a confianca filtra sem refazer os modelos
+  $('cmpConf').value = '0.35'; $('cmpConf').dispatchEvent(new window.Event('input'));
+  const lin2 = [...window.document.querySelectorAll('#cmpBody tr')].map((r) => r.children[1].textContent);
+  check(lin2.join(',') === '1,1,2', 'caixas em confianca 0,35: ' + lin2.join(','));
+  check(instancia === 3, 'cada modelo rodou uma vez so');
+  // desligar um chip tira as caixas dele do desenho, mas nao da tabela
+  $('cmpChipC4').checked = false; $('cmpChipC4').dispatchEvent(new window.Event('change'));
+  check(window.document.querySelectorAll('#cmpBody tr').length === 3, 'tabela continua com tres linhas');
+  // relatorio inclui a comparacao
+  $('copyJson').click(); await sleep(100);
+  const rep2 = JSON.parse($('jsonFallback').value);
+  check(rep2.comparacaoModelos && rep2.comparacaoModelos.modelos.length === 3 && rep2.comparacaoModelos.confiancaMinima === 0.35, 'relatorio com a comparacao dos modelos');
+  console.log('   relatorio:', JSON.stringify(rep2.comparacaoModelos.modelos.map((m) => [m.id, m.caixas])));
   console.log('\nERROS DE JS:', errors.length ? errors : 'nenhum');
   process.exit(errors.length ? 1 : 0);
 })().catch((e) => { console.error('FALHA:', e.message); console.error(errors); process.exit(1); });

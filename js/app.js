@@ -176,6 +176,149 @@
     $('legModel').hidden = !S.model.on;
   }
 
+  // ------------------------------------------------------------ comparar modelos (A, C2 e C4 na mesma foto)
+  // So para comparar e mostrar: a triagem, o mapa e o laudo continuam usando o modelo A. Cada modelo tem a sua sessao ONNX.
+  var CMP_MODELS = [
+    { id: 'A', url: 'models/yolo-A-pinturas.onnx', cor: '#1fd1ff', nota: 'pinturas de cavalete; o mais conservador' },
+    { id: 'C2', url: 'models/yolo-C2-pinturas-met.onnx', cor: '#ffd21f', nota: 'A mais pinturas do Met; intermediário' },
+    { id: 'C4', url: 'models/yolo-C4-pinturas-met.onnx', cor: '#ff5fa2', nota: 'A, Met e ARTeFACT; o mais sensível, com mais falsos alarmes' }
+  ];
+  var cmp = { busy: false, on: { A: true, C2: true, C4: true }, conf: 0.10 };
+
+  function cmpStatus(text, kind) { var el = $('cmpStatus'); el.textContent = text || ''; el.dataset.kind = kind || ''; }
+  function cmpDone(ref) { return !!(ref && ref.cmp && CMP_MODELS.every(function (m) { return ref.cmp[m.id] && ref.cmp[m.id].boxes; })); }
+  async function cmpLoad(m) {
+    if (m.M && m.M.pronto()) return;
+    if (m.id === 'A' && S.model.M && S.model.M.pronto()) { m.M = S.model.M; return; }   // o A ja esta carregado pelo fluxo principal
+    var head = await fetch(m.url, { method: 'HEAD' });
+    if (!head.ok) throw new Error('arquivo ' + m.url + ' não encontrado');
+    if (!window.ort) await loadScript(ORT_URL);
+    window.ort.env.wasm.proxy = false;
+    var M = window.createModelo(window.ort), t0 = performance.now();
+    await M.carregar(m.url);
+    m.M = M; m.loadMs = performance.now() - t0;
+  }
+  /** Caixas de um modelo acima da confianca escolhida e com o centro dentro do recorte da peca. */
+  function cmpBoxes(ref, id) {
+    var r = ref.cmp && ref.cmp[id];
+    if (!r || !r.boxes) return [];
+    var W = ref.canvas.width, H = ref.canvas.height, c = cropRect(W, H);
+    return r.boxes.filter(function (b) {
+      var cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+      return b.score >= cmp.conf && cx >= c.x0 && cx <= c.x1 && cy >= c.y0 && cy <= c.y1;
+    });
+  }
+  /** Fracao da imagem coberta pela uniao das caixas (grade grossa, sem contar duas vezes onde elas se sobrepoem). */
+  function cmpUnionFrac(boxes, W, H) {
+    var g = Math.max(1, Math.round(W / 320)), gw = Math.ceil(W / g), gh = Math.ceil(H / g), m = new Uint8Array(gw * gh), n = 0;
+    boxes.forEach(function (b) {
+      var x0 = Math.max(0, Math.floor(b.x / g)), x1 = Math.min(gw, Math.ceil((b.x + b.w) / g));
+      var y0 = Math.max(0, Math.floor(b.y / g)), y1 = Math.min(gh, Math.ceil((b.y + b.h) / g));
+      for (var y = y0; y < y1; y++) for (var x = x0; x < x1; x++) if (!m[y * gw + x]) { m[y * gw + x] = 1; n++; }
+    });
+    return n / (gw * gh);
+  }
+  function cmpBuildChips() {
+    var box = $('cmpChips');
+    if (box.children.length) return;
+    CMP_MODELS.forEach(function (m) {
+      var lab = document.createElement('label'); lab.className = 'chip';
+      var inp = document.createElement('input'); inp.type = 'checkbox'; inp.checked = !!cmp.on[m.id]; inp.id = 'cmpChip' + m.id;
+      inp.addEventListener('change', function () { cmp.on[m.id] = inp.checked; cmpRender(); });
+      var sp = document.createElement('span'), sw = document.createElement('i'), tx = document.createElement('b');
+      sw.className = 'cmp-sw'; sw.style.background = m.cor; tx.id = 'cmpChipTxt' + m.id; tx.textContent = m.id;
+      sp.appendChild(sw); sp.appendChild(tx); lab.appendChild(inp); lab.appendChild(sp); box.appendChild(lab);
+    });
+  }
+  function cmpRender() {
+    var ref = S.ref;
+    if (!ref || !ref.cmp) return;
+    var stage = $('cmpStage'), W = ref.canvas.width, H = ref.canvas.height;
+    var cv0 = stage.querySelector('canvas');
+    if (!cv0) { stage.textContent = ''; cv0 = document.createElement('canvas'); cv0.setAttribute('role', 'img'); cv0.setAttribute('aria-label', 'Imagem com as marcas de cada modelo'); stage.appendChild(cv0); }
+    cv0.width = W; cv0.height = H;
+    var ctx = cv0.getContext('2d');
+    paintTo(ctx, W, H, { damage: false, tiles: false, sec: false, alpha: 0, crop: true });
+    var lw = Math.max(2, W / 450);
+    CMP_MODELS.slice().reverse().forEach(function (m) {            // o A por cima: e o que tem menos caixas
+      if (!cmp.on[m.id]) return;
+      cmpBoxes(ref, m.id).forEach(function (b) {
+        var pad = lw;
+        ctx.lineWidth = lw + 3; ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.strokeRect(b.x - pad, b.y - pad, b.w + pad * 2, b.h + pad * 2);
+        ctx.lineWidth = lw; ctx.strokeStyle = m.cor; ctx.strokeRect(b.x - pad, b.y - pad, b.w + pad * 2, b.h + pad * 2);
+      });
+    });
+    cmpBuildChips();
+    $('cmpChips').hidden = false; $('cmpConfWrap').hidden = false; $('cmpTblWrap').hidden = false; $('cmpNote').hidden = false;
+    var body = $('cmpBody'); body.textContent = '';
+    CMP_MODELS.forEach(function (m) {
+      var r = ref.cmp[m.id], row = document.createElement('tr');
+      var tdNome = document.createElement('td'), nome = document.createElement('span'), sw = document.createElement('i'), tn = document.createElement('b'), nota = document.createElement('span');
+      nome.className = 'cmp-nome'; sw.className = 'cmp-sw'; sw.style.background = m.cor; tn.textContent = m.id;
+      nota.className = 'cmp-nota'; nota.textContent = r && r.erro ? 'indisponível: ' + r.erro : m.nota;
+      nome.appendChild(sw); nome.appendChild(tn); tdNome.appendChild(nome); tdNome.appendChild(nota); row.appendChild(tdNome);
+      var boxes = r && r.boxes ? cmpBoxes(ref, m.id) : null;
+      var cels = boxes ? [String(boxes.length), pct(cmpUnionFrac(boxes, W, H), 1), ms(r.ms)] : ['--', '--', '--'];
+      cels.forEach(function (t) { var td = document.createElement('td'); td.className = 'num'; td.textContent = t; row.appendChild(td); });
+      body.appendChild(row);
+      var tx = $('cmpChipTxt' + m.id);
+      if (tx) tx.textContent = m.id + (boxes ? ' · ' + boxes.length : '');
+    });
+  }
+  function cmpReset() {
+    var stage = $('cmpStage');
+    stage.textContent = '';
+    var p = document.createElement('p'); p.className = 'empty';
+    p.textContent = 'Depois de escolher a foto de referência, toque em "Comparar os 3 modelos" para ver as marcas de cada um aqui.';
+    stage.appendChild(p);
+    $('cmpChips').hidden = true; $('cmpConfWrap').hidden = true; $('cmpTblWrap').hidden = true; $('cmpNote').hidden = true;
+    cmpStatus('');
+  }
+  /** Atualiza o botao, a etiqueta e o desenho conforme o estado da referencia. */
+  function cmpSync() {
+    var ref = S.ref, has = !!(ref && ref.file), any = !!(ref && ref.cmp);
+    $('cmpRun').disabled = !has || cmp.busy || cmpDone(ref);
+    if (cmp.busy) setPill($('cmpPill'), 'warn', 'comparando');
+    else if (cmpDone(ref)) setPill($('cmpPill'), 'ok', 'comparado');
+    else if (any) setPill($('cmpPill'), 'warn', 'incompleto');
+    else setPill($('cmpPill'), 'idle', has ? 'pronto para comparar' : 'aguardando foto');
+    if (any) cmpRender();
+  }
+  async function cmpRun() {
+    var ref = S.ref;
+    if (cmp.busy || !ref || !ref.file) return;
+    if (S.busy) { toast('Aguarde a análise terminar'); return; }
+    cmp.busy = true; ref.cmp = ref.cmp || {}; cmpSync();
+    var big = null, k = 1;
+    try {
+      big = await readForModel(ref.file);
+      k = ref.canvas.width / big.width;
+      for (var i = 0; i < CMP_MODELS.length; i++) {
+        var m = CMP_MODELS[i];
+        if (ref.cmp[m.id] && ref.cmp[m.id].boxes) continue;
+        if (m.id === 'A' && ref.model) { ref.cmp.A = { ms: ref.model.ms, boxes: ref.model.boxes }; continue; }   // o fluxo principal ja rodou o A nesta foto
+        try {
+          cmpStatus('Carregando o modelo ' + m.id + '...', 'warn');
+          await cmpLoad(m);
+          var res = await m.M.detectar(big, {
+            progresso: function (n, total) { cmpStatus('Modelo ' + m.id + ': recorte ' + n + ' de ' + total, 'warn'); },
+            aguardar: tick
+          });
+          ref.cmp[m.id] = { ms: res.ms, recortes: res.recortes, boxes: res.caixas.map(function (c) { return { x: c.x * k, y: c.y * k, w: c.w * k, h: c.h * k, area: c.w * k * c.h * k, score: c.score }; }) };
+        } catch (e) { ref.cmp[m.id] = { erro: errText(e) }; }
+        if (S.ref === ref) cmpRender();
+      }
+      var falhou = CMP_MODELS.filter(function (m) { return ref.cmp[m.id] && ref.cmp[m.id].erro; });
+      cmpStatus(falhou.length ? 'Modelo sem resposta: ' + falhou.map(function (m) { return m.id; }).join(', ') + '. Os outros foram comparados.' : 'Pronto: veja as marcas de cada modelo abaixo.', falhou.length ? 'crit' : 'ok');
+    } catch (e) {
+      cmpStatus('Falha na comparação: ' + errText(e), 'crit');
+    } finally {
+      if (big) { big.width = 0; big.height = 0; }
+      cmp.busy = false;
+      if (S.ref === ref) cmpSync();
+    }
+  }
+
   // ------------------------------------------------------------ leitura de imagem
   /** Decodifica o arquivo (com a rotacao do EXIF) e entrega a fonte, o tamanho original e como liberar. */
   function decodeFile(file) {
@@ -282,6 +425,7 @@
     resetShots();
     if (S.ref) { freeMat(S.ref.mat); if (S.ref.det) freeMat(S.ref.det.mask); }
     S.ref = null; S.forced = false; S.merged = null; S.triage = null;
+    cmpReset(); cmpSync();
     if (S.model.state !== 'erro') modelStatus(S.model.state === 'pronto' ? 'Modelo pronto' : '', S.model.state === 'pronto' ? 'ok' : '');   // o aviso de falha fica na tela
     enableShots(false); $('overrideRow').hidden = true; $('copyJson').disabled = true; $('reanalyze').disabled = true;
     $('cropBox').hidden = true;
@@ -550,6 +694,7 @@
     $('tglDamage').disabled = !hasDet; $('tglTiles').disabled = !hasDet;
     $('alphaWrap').hidden = !(S.view.sec && lastWarped());
     $('viewInfo').textContent = W + ' × ' + H + ' px';
+    cmpSync();
   }
 
   // ------------------------------------------------------------ triagem e metricas
@@ -651,6 +796,10 @@
       modeloTreinado: S.model.on ? { ativo: true, arquivo: MODEL_URL, confiancaMinima: S.model.conf, experimental: false,
         referencia: S.ref && S.ref.model ? { ms: S.ref.model.ms, caixasCandidatas: S.ref.model.boxes.length } : null } : { ativo: false },
       danos: (S.merged || []).map(function (e) { return { id: e.id, tipo: e.type, x: e.x, y: e.y, largura: e.w, altura: e.h, centroNormalizado: [+e.cx.toFixed(4), +e.cy.toFixed(4)], vistoEm: e.sources, achadoPor: e.motores || ['classico'], confiancaModelo: e.scoreModelo != null ? +e.scoreModelo.toFixed(3) : undefined }; }),
+      comparacaoModelos: S.ref && S.ref.cmp ? { confiancaMinima: cmp.conf, modelos: CMP_MODELS.map(function (m) {
+        var r = S.ref.cmp[m.id], boxes = r && r.boxes ? cmpBoxes(S.ref, m.id) : null;
+        return { id: m.id, arquivo: m.url, erro: r && r.erro || null, caixas: boxes ? boxes.length : null, areaMarcada: boxes ? +cmpUnionFrac(boxes, S.ref.canvas.width, S.ref.canvas.height).toFixed(4) : null, ms: r && r.ms != null ? Math.round(r.ms) : null };
+      }) } : null,
       triagem: S.triage,
       observacao: 'Ferramenta de triagem; nao substitui a analise do profissional.'
     };
@@ -793,6 +942,8 @@
     refreshAfterModel();
   });
   $('copyJson').addEventListener('click', copyReport);
+  $('cmpRun').addEventListener('click', cmpRun);
+  $('cmpConf').addEventListener('input', function (e) { cmp.conf = parseFloat(e.target.value); $('cmpConfVal').textContent = fmtNum(cmp.conf, 2); cmpRender(); });
   $('makeImg').addEventListener('click', makeMapImage);
 
   ['modePintura', 'modeImpresso'].forEach(function (id) {

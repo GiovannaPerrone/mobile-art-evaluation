@@ -21,7 +21,8 @@ Página estática, sem backend. Tudo roda no navegador do celular (on-device). O
 | `js/pipeline.js` | Visão computacional (sem DOM). Funciona no navegador e no Node |
 | `js/modelo.js` | Modelo treinado (YOLOv8n ONNX) com onnxruntime-web, sem DOM. Recortes de 640 px, NMS |
 | `js/app.js` | Interface: leitura das fotos, botões, desenho do mapa, relatório JSON |
-| `models/yolo-A-pinturas.onnx` | Modelo treinado (12 MB), carregado só se a opção experimental for ligada |
+| `models/yolo-A-pinturas.onnx` | Modelo treinado A (12 MB), padrão do app |
+| `models/yolo-C2-pinturas-met.onnx`, `models/yolo-C4-pinturas-met.onnx` | Modelos C2 e C4, só usados no painel "Comparar modelos" (12 MB cada) |
 | `build.js` | Gera `dist/triagem-de-avarias.html` (arquivo único). Não edite o `dist/` à mão |
 | `tests/` | Testes com imagens sintéticas (Node + jsdom) |
 
@@ -43,9 +44,11 @@ Todos os limiares ficam em `P.params`, no topo de `createPipeline`.
 - Modelo: YOLOv8n de uma classe ("avaria"), ONNX executado com `onnxruntime-web` 1.30.0 (WASM, CDN jsDelivr), pré-carregado assim que o OpenCV fica pronto. A foto vai a 2560 px no lado maior e é percorrida em recortes de 640 px com passo 480 (mesma escala do treino; testado 1920 e 3200 px: pior); NMS 0,45; confiança padrão 0,10 (slider). Marcas do modelo aparecem em violeta com a letra A; com o clássico também ligado, o campo `motores` do relatório diz quem viu cada uma. Primeiro uso baixa ~12 MB; ~9 s por foto no Chromium headless (celular deve ser mais lento). A triagem (`P.triage`) usa os limiares do clássico; com o modelo a 0,10 quase toda pintura sai "alta".
 - Modelos treinados no Colab (`tools/` tem os scripts de dataset e avaliação; `dataset/` não vai para o git):
   - **A** (pinturas, ArtInsight + rótulos da autora; 142 treino/9 val): é o que está no app. Melhor em dentro do domínio (perda de tinta em pinturas ArtInsight, 42/165 polígonos tocados a conf 0,10; o clássico toca 10/165), quase silencioso em álbuns. **Não generaliza** para pinturas do Met nem para a viseira de metal. Erros vistos: quase cego na Pintura_0.16 (2/41, perda clara sobre fundo escuro e tecido branco), perde faixas finas da margem da tela e perdas pequenas; marca alguns detalhes pintados (rosto, casco) mas não o remo nem a proa. Inferência com espelhamento (TTA) acha de +14% a +55% mais polígonos, mas dobra o tempo.
+  - **C2** (A + Met rotulado pela autora): mais sensível que A em tela (40/106 vs 19/106 caixas de gabarito tocadas a conf 0,10 nas 11 telas de teste), equilibrado nos álbuns. Não melhorou no ArtInsight (Pintura_0.10: 10/124 vs 28/124 a conf 0,10).
+  - **C4** (A x4 + Met + ARTeFACT/AFL-3.0, 2035 recortes; ARTeFACT = 541 recortes, 27%): o mais sensível em tela (67/106 a conf 0,10; 6 telas do ARTeFACT separadas só para teste), mas inunda as fotos de celular a conf 0,10 (álbum limpo: 51 caixas, ~30% da imagem; A: 4, C2: 7). Decisão: **A continua padrão**; C2 e C4 aparecem só no painel "Comparar modelos". Testes são minúsculos; o teste das telas do ARTeFACT favorece o C4 (mesma fonte/estilo de rótulo).
   - **B** (A + steelbook): só ajuda na viseira de metal e inunda os álbuns em confiança baixa. Não está no app.
   - Combinar A com o clássico dá ganho modesto (51/165); os dois quase não se sobrepõem.
-- Só o modelo A vai para o git (`models/yolo-A-pinturas.onnx`). O B e o modelo antigo ficam fora.
+- Vão para o git os modelos A, C2 e C4 (`models/`; os dois últimos para o painel "Comparar modelos", que roda os três na foto de referência, sem alterar triagem nem laudo). O B e o modelo antigo ficam fora.
 - Licenças: ArtInsight CC-BY-4.0 (Zenodo 15640972 e 8429815), Met Open Access CC0, Heritage Cracks CC BY-NC 4.0, MaskCLP. O repositório é público: citar as fontes.
 - O artigo descreve um sensor de luz ambiente, mas o navegador não dá acesso a ele. O app usa a luminância da própria foto. O texto da seção II precisa refletir isso.
 - Ignorar do artigo tudo a partir da "Semana 7" (é template de outro grupo, sobre mochila antifurto).

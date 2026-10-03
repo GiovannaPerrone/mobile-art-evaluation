@@ -153,3 +153,8 @@ textarea.fallback { width: 100%; min-height: 120px; font-family: var(--font-data
 .shot-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 0.9rem; font-weight: 600; }
 .shot-info { font-size: 0.8rem; overflow-wrap: anywhere; }
 .btn.small { min-height: 36px; padding: 6px 12px; font-size: 0.85rem; justify-self: start; }
+
+/* comparacao de modelos */
+.cmp-sw { width: 14px; height: 14px; border-radius: 3px; display: inline-block; flex: none; border: 2px solid rgba(0,0,0,0.45); }
+.cmp-nota { display: block; font-size: 0.72rem; color: var(--fg-muted); white-space: normal; max-width: 34ch; }
+.cmp-nome { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }

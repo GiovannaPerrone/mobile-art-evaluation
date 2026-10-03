@@ -94,6 +94,33 @@
           <p class="muted">Toque e segure a imagem para salvar no celular.</p>
         </div>
       </section>
+
+      <section class="panel" aria-labelledby="h-cmp" id="cmpPanel">
+        <div class="panel-head">
+          <h2 id="h-cmp">Comparar modelos</h2>
+          <span class="pill idle" id="cmpPill">aguardando foto</span>
+        </div>
+        <p class="muted">Roda os três modelos treinados (A, C2 e C4) na foto de referência e mostra o que cada um marca, cada um com a sua cor. É só uma comparação: a triagem e o laudo continuam usando o modelo A. Cada modelo baixa cerca de 12 MB na primeira vez.</p>
+        <div class="btn-row">
+          <button class="btn primary" id="cmpRun" type="button" disabled>Comparar os 3 modelos</button>
+        </div>
+        <div class="status-line" id="cmpStatus" role="status"></div>
+        <div class="stage" id="cmpStage">
+          <p class="empty">Depois de escolher a foto de referência, toque em "Comparar os 3 modelos" para ver as marcas de cada um aqui.</p>
+        </div>
+        <div class="chips" id="cmpChips" hidden></div>
+        <div class="slider" id="cmpConfWrap" hidden>
+          <label for="cmpConf">Confiança mínima (vale para os três): <span class="mono" id="cmpConfVal">0,10</span></label>
+          <input type="range" id="cmpConf" min="0.05" max="0.5" step="0.05" value="0.10">
+        </div>
+        <div class="tbl-wrap" id="cmpTblWrap" hidden>
+          <table>
+            <thead><tr><th>Modelo</th><th>Caixas</th><th>Área marcada</th><th>Tempo</th></tr></thead>
+            <tbody id="cmpBody"></tbody>
+          </table>
+        </div>
+        <p class="muted small" id="cmpNote" hidden>Mais caixas não quer dizer mais acertos: o modelo mais sensível também marca textura de tela e craquelê como avaria. Use a comparação para decidir onde olhar com mais atenção, e o olhar do profissional continua valendo mais.</p>
+      </section>
     </div>
 
     <div class="col">
