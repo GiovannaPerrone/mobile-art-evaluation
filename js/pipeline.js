@@ -25,7 +25,17 @@
       lossMinV: 150,     // prior: camada de preparo exposta e clara (V alto)
       lossMaxS: 90,      // ... e pouco saturada (S baixo)
       lossPosDV: 25,     // ... e mais clara que o fundo local (V - V_local)
-      lossTileFrac: 0.12 // fracao minima de pixels de perda para o tile ser candidato
+      lossTileFrac: 0.12, // fracao minima de pixels de perda para o tile ser candidato
+      // ---- modo "impresso / ilustracao" (detectPrint)
+      printDarkThr: 18,        // contraste minimo da mancha escura em relacao ao entorno (0-255)
+      printOpenFrac: 0.004,    // abertura que remove tracos finos do desenho (fracao do lado da obra)
+      printBgFrac: 0.05,       // tamanho da mediana que estima a cor local (fracao do lado)
+      printDetailMax: 0.36,    // regiao com mais detalhe impresso que isso e descartada (0-1)
+      printDetailWin: 0.045,   // janela da medida de detalhe (fracao do lado)
+      printEdgeGrad: 60,       // gradiente a partir do qual um pixel conta como contorno do desenho
+      printMinArea: 30,        // area minima da mancha (px, na escala de 1280 px)
+      printMaxAreaFrac: 0.0006,// area maxima (fracao da area da obra); acima disso e forma do desenho
+      printMaxAspect: 5        // manchas muito alongadas sao tracos do desenho, nao manchas
     };
 
     function odd(n) { n = Math.round(n); return n % 2 === 0 ? n + 1 : n; }
@@ -238,6 +248,132 @@
       };
     };
 
+
+    // ---------------------------------------------------------------- 2b'. deteccao para impresso / ilustracao
+    /**
+     * Para arte impressa (ilustracao, steelbook, poster), em que os contornos do desenho
+     * parecem rachaduras e as areas claras parecem perda de cor.
+     *  (1) descarta regioes com muito detalhe impresso: ali uma mancha pequena nao se
+     *      distingue do proprio desenho;
+     *  (2) nas regioes planas, procura manchas escuras compactas (ferrugem, tinta solta)
+     *      que destoam do entorno, depois de remover os tracos finos por abertura morfologica.
+     * opts.sideEff: lado (em px desta imagem) que corresponderia a obra inteira. Fotos de
+     * detalhe passam um valor maior para usar os mesmos tamanhos fisicos da foto geral.
+     */
+    P.detectPrint = function (rgba, validMask, opts) {
+      opts = opts || {};
+      const t0 = now();
+      const p = P.params;
+      const W = rgba.cols, H = rgba.rows;
+      const side = opts.sideEff || Math.max(W, H);
+      const areaScale = (side / 1280) * (side / 1280);
+      const garbage = [];
+      const keep = (m) => { garbage.push(m); return m; };
+
+      const gray = keep(new cv.Mat());
+      cv.cvtColor(rgba, gray, cv.COLOR_RGBA2GRAY);
+
+      // cor local (mediana grande) e "escurecimento" em relacao a ela
+      const bg = keep(new cv.Mat());
+      cv.medianBlur(gray, bg, Math.min(255, odd(p.printBgFrac * side)));
+      const dark = keep(new cv.Mat());
+      cv.subtract(bg, gray, dark); // 8 bits satura em 0: so o que e mais escuro que o entorno
+
+      // abertura: remove tracos mais finos que o nucleo (contornos do desenho)
+      const kOpen = odd(Math.max(3, p.printOpenFrac * side));
+      const kernel = keep(cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(kOpen, kOpen)));
+      const opened = keep(new cv.Mat());
+      cv.morphologyEx(dark, opened, cv.MORPH_OPEN, kernel);
+      const spots = keep(new cv.Mat());
+      cv.threshold(opened, spots, p.printDarkThr, 255, cv.THRESH_BINARY);
+
+      // densidade de detalhe impresso: fracao de pixels de contorno forte numa janela
+      const sm = keep(new cv.Mat());
+      cv.GaussianBlur(gray, sm, new cv.Size(0, 0), 1.2 * (side / 1280), 1.2 * (side / 1280));
+      const gx = keep(new cv.Mat()), gy = keep(new cv.Mat()), mag = keep(new cv.Mat());
+      cv.Sobel(sm, gx, cv.CV_32F, 1, 0); cv.Sobel(sm, gy, cv.CV_32F, 0, 1);
+      cv.magnitude(gx, gy, mag);
+      const strong32 = keep(new cv.Mat()), strong = keep(new cv.Mat());
+      cv.threshold(mag, strong32, p.printEdgeGrad, 255, cv.THRESH_BINARY);
+      strong32.convertTo(strong, cv.CV_8U);
+      const win = odd(p.printDetailWin * side);
+      const density = keep(new cv.Mat());
+      cv.blur(strong, density, new cv.Size(win, win)); // 0..255 = 0..100% de pixels de contorno
+      const flat = keep(new cv.Mat());
+      cv.threshold(density, flat, p.printDetailMax * 255, 255, cv.THRESH_BINARY_INV);
+
+      // regiao valida (recorte da obra / area alinhada), afastada das bordas para evitar efeito de borda
+      const valid = keep(new cv.Mat());
+      if (validMask) {
+        const mg = odd(Math.max(3, 0.012 * side));
+        const ek = keep(cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(mg, mg)));
+        cv.erode(validMask, valid, ek);
+      } else {
+        valid.create(H, W, cv.CV_8UC1); valid.setTo(new cv.Scalar(255));
+      }
+
+      const analyzable = keep(new cv.Mat());
+      cv.bitwise_and(flat, valid, analyzable);
+      const cand = keep(new cv.Mat());
+      cv.bitwise_and(spots, analyzable, cand);
+
+      // quadrados de 32 px para exibir o que foi descartado
+      const T = p.tile;
+      const cols = Math.ceil(W / T), rows = Math.ceil(H / T);
+      const tValid = keep(new cv.Mat()), tFlat = keep(new cv.Mat());
+      cv.resize(valid, tValid, new cv.Size(cols, rows), 0, 0, cv.INTER_AREA);
+      cv.resize(analyzable, tFlat, new cv.Size(cols, rows), 0, 0, cv.INTER_AREA);
+      const tileKeep = new Uint8Array(cols * rows);
+      let evaluated = 0, candidates = 0;
+      for (let i = 0; i < cols * rows; i++) {
+        if (tValid.data[i] < 200) continue; // quadrado fora da regiao valida
+        evaluated++;
+        if (tFlat.data[i] >= 128) { tileKeep[i] = 1; candidates++; }
+      }
+      const rejected = evaluated - candidates;
+
+      // componentes conexos = manchas
+      const labels = keep(new cv.Mat()), stats = keep(new cv.Mat()), cent = keep(new cv.Mat());
+      const n = cv.connectedComponentsWithStats(cand, labels, stats, cent, 8);
+      const minArea = Math.max(8, p.printMinArea * areaScale);
+      const maxArea = p.printMaxAreaFrac * 0.75 * side * side;
+      const accepted = new Uint8Array(n);
+      const boxes = [];
+      for (let i = 1; i < n; i++) {
+        const w = stats.intAt(i, cv.CC_STAT_WIDTH), h = stats.intAt(i, cv.CC_STAT_HEIGHT), area = stats.intAt(i, cv.CC_STAT_AREA);
+        if (area < minArea || area > maxArea) continue;
+        const aspect = Math.max(w, h) / Math.max(1, Math.min(w, h));
+        if (aspect > p.printMaxAspect) continue;
+        accepted[i] = 1;
+        boxes.push({ x: stats.intAt(i, cv.CC_STAT_LEFT), y: stats.intAt(i, cv.CC_STAT_TOP), w, h, area, type: 'mancha' });
+      }
+      const outMask = cv.Mat.zeros(H, W, cv.CV_8UC1);
+      const lab = labels.data32S, od = outMask.data;
+      for (let i = 0; i < lab.length; i++) if (lab[i] > 0 && accepted[lab[i]]) od[i] = 255;
+
+      const damagePx = cv.countNonZero(outMask);
+      const validPx = Math.max(1, cv.countNonZero(valid));
+      garbage.forEach((m) => { try { m.delete(); } catch (e) { /* ja liberado */ } });
+
+      return {
+        boxes, mask: outMask,
+        tiles: { cols, rows, size: T, keep: tileKeep, evaluated, candidates, rejected },
+        stats: {
+          width: W, height: H, mode: 'impresso', crackThr: null, damageFrac: damagePx / validPx,
+          rejectedFrac: evaluated ? rejected / evaluated : 0,
+          crackCount: 0, lossCount: 0, stainCount: boxes.length,
+          ms: now() - t0
+        }
+      };
+    };
+
+    /** Escolhe o detector conforme o tipo de obra: 'pintura' (padrao) ou 'impresso'. */
+    P.detect = function (rgba, validMask, opts) {
+      opts = opts || {};
+      if (opts.mode === 'impresso') return P.detectPrint(rgba, validMask, opts);
+      return P.detectDamage(rgba, validMask);
+    };
+
     // ---------------------------------------------------------------- 3. ORB + Condition Map
     P.registerCaptures = function (refRGBA, secRGBA) {
       const t0 = now();
@@ -340,12 +476,83 @@
       return entries;
     };
 
-    /** Prioridade de inspecao (heuristica, limiares ajustaveis) */
-    P.triage = function (damageFrac, nEntries) {
+    // ---------------------------------------------------------------- varias fotos: levar tudo para o quadro da referencia
+    function applyH(Hm, x, y) {
+      const w = Hm[6] * x + Hm[7] * y + Hm[8];
+      return [(Hm[0] * x + Hm[1] * y + Hm[2]) / w, (Hm[3] * x + Hm[4] * y + Hm[5]) / w];
+    }
+    /** Escala media da homografia (pixel da foto -> pixel da referencia). Menor que 1 em foto de detalhe. */
+    P.homographyScale = function (Hm) { return Math.sqrt(Math.abs(Hm[0] * Hm[4] - Hm[1] * Hm[3])); };
+
+    /** Caixas da foto -> retangulos envolventes no quadro da referencia (H leva foto -> referencia). */
+    P.mapBoxes = function (boxes, Hm, refW, refH) {
+      const s2 = Math.abs(Hm[0] * Hm[4] - Hm[1] * Hm[3]);
+      const out = [];
+      boxes.forEach((b) => {
+        const pts = [[b.x, b.y], [b.x + b.w, b.y], [b.x + b.w, b.y + b.h], [b.x, b.y + b.h]].map((q) => applyH(Hm, q[0], q[1]));
+        const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]);
+        const cx = (Math.min.apply(null, xs) + Math.max.apply(null, xs)) / 2, cy = (Math.min.apply(null, ys) + Math.max.apply(null, ys)) / 2;
+        if (cx < 0 || cy < 0 || cx > refW || cy > refH) return; // centro fora do quadro da referencia
+        const x0 = Math.max(0, Math.floor(Math.min.apply(null, xs))), y0 = Math.max(0, Math.floor(Math.min.apply(null, ys)));
+        const x1 = Math.min(refW, Math.ceil(Math.max.apply(null, xs))), y1 = Math.min(refH, Math.ceil(Math.max.apply(null, ys)));
+        if (x1 - x0 < 2 || y1 - y0 < 2) return;
+        out.push({ x: x0, y: y0, w: x1 - x0, h: y1 - y0, area: b.area * s2, type: b.type });
+      });
+      return out;
+    };
+
+    /** Mascara da foto -> mascara no quadro da referencia. Quem chama libera o resultado. */
+    P.warpMask = function (mask, Hm, refW, refH) {
+      const M = cv.matFromArray(3, 3, cv.CV_64F, Hm);
+      const dst = new cv.Mat();
+      cv.warpPerspective(mask, dst, M, new cv.Size(refW, refH), cv.INTER_NEAREST, cv.BORDER_CONSTANT, new cv.Scalar(0));
+      M.delete();
+      return dst;
+    };
+
+    /** Recorte da referencia (255 = dentro) -> mesmo recorte no quadro da foto. Quem chama libera o resultado. */
+    P.warpMaskToShot = function (refMask, Hm, shotW, shotH) {
+      const M = cv.matFromArray(3, 3, cv.CV_64F, Hm);
+      const dst = new cv.Mat();
+      cv.warpPerspective(refMask, dst, M, new cv.Size(shotW, shotH), cv.INTER_NEAREST | cv.WARP_INVERSE_MAP, cv.BORDER_CONSTANT, new cv.Scalar(0));
+      M.delete();
+      return dst;
+    };
+
+    /**
+     * Junta os danos da referencia com os de qualquer numero de fotos adicionais.
+     * shots: [{ label: 'luz normal' | 'luz rasante', boxes: [...] }] com caixas ja no quadro da referencia.
+     * Cada entrada diz em quais capturas o dano apareceu (confirmacao cruzada).
+     */
+    P.mergeAll = function (refBoxes, shots, W, H) {
+      const entries = refBoxes.map((b) => ({ ...b, sources: ['luz normal'], seenIn: 1 }));
+      shots.forEach((sh) => {
+        sh.boxes.forEach((b) => {
+          let match = -1, best = 0.05;
+          entries.forEach((e, j) => { const v = iou(e, b); if (v > best) { best = v; match = j; } });
+          if (match >= 0) {
+            const e = entries[match];
+            if (e.sources.indexOf(sh.label) < 0) e.sources.push(sh.label);
+            e.seenIn++;
+          } else entries.push({ ...b, sources: [sh.label], seenIn: 1 });
+        });
+      });
+      entries.forEach((e, idx) => {
+        e.id = idx + 1;
+        e.cx = (e.x + e.w / 2) / W; e.cy = (e.y + e.h / 2) / H; // coordenadas normalizadas na obra
+      });
+      return entries;
+    };
+
+    /** Prioridade de inspecao (heuristica, limiares ajustaveis). Em 'impresso' conta so as manchas. */
+    P.triage = function (damageFrac, nEntries, mode) {
       let level = 'baixa';
-      if (damageFrac >= 0.01 || nEntries >= 8) level = 'alta';
+      if (mode === 'impresso') {
+        if (nEntries >= 25 || damageFrac >= 0.01) level = 'alta';
+        else if (nEntries >= 10 || damageFrac >= 0.003) level = 'media';
+      } else if (damageFrac >= 0.01 || nEntries >= 8) level = 'alta';
       else if (damageFrac >= 0.002 || nEntries >= 3) level = 'media';
-      return { level, damageFrac, nEntries };
+      return { level, damageFrac, nEntries, mode: mode || 'pintura' };
     };
 
     return P;

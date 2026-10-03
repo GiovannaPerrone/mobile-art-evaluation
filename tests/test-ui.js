@@ -41,6 +41,10 @@ sg.translate(800 + 20, 600 - 14); sg.rotate(4 * Math.PI / 180); sg.scale(0.96, 0
 sg.drawImage(painting, 0, 0); sg.setTransform(1, 0, 0, 1, 0, 0);
 sg.fillStyle = 'rgba(0,0,0,0.15)'; sg.fillRect(0, 0, 1600, 1200);
 const secPng = secCanvas.toBuffer('image/png');
+// foto de detalhe: recorte 640x480 da pintura ampliado para 1280x960
+const detailCanvas = napi.createCanvas(1280, 960), dg = detailCanvas.getContext('2d');
+dg.drawImage(painting, 150, 120, 640, 480, 0, 0, 1280, 960);
+const detailPng = detailCanvas.toBuffer('image/png');
 console.log('imagens de teste:', (refPng.length / 1024).toFixed(0), 'kB e', (secPng.length / 1024).toFixed(0), 'kB');
 
 // ---------------------------------------------------------------- DOM com shims
@@ -80,10 +84,13 @@ async function waitFor(fn, label, timeout = 90000) {
 }
 function pick(inputId, buf, name) {
   const input = $(inputId);
-  const file = { name, size: buf.length, __buf: buf };
-  Object.defineProperty(input, 'files', { value: [file], configurable: true });
+  const bufs = Array.isArray(buf) ? buf : [buf];
+  const files = bufs.map((b, i) => ({ name: Array.isArray(name) ? name[i] : name, size: b.length, __buf: b }));
+  Object.defineProperty(input, 'files', { value: files, configurable: true });
   input.dispatchEvent(new window.Event('change'));
 }
+const shotPills = () => [...window.document.querySelectorAll('#shotList .pill')].map((e) => e.textContent);
+function check(cond, label) { if (!cond) throw new Error('verificacao falhou: ' + label); }
 
 (async () => {
   await waitFor(() => /pronto/.test($('engineText').textContent), 'motor pronto');
@@ -94,12 +101,20 @@ function pick(inputId, buf, name) {
   console.log('2. referencia:', $('refPill').textContent, '|', $('refStatus').textContent);
   console.log('   iluminacao:', $('illPill').textContent, $('illVal').textContent, '|', $('illMsg').textContent);
   console.log('   triagem:', $('triLevel').textContent, '| danos', $('triCount').textContent, '| area', $('triArea').textContent, '| descartadas', $('triRej').textContent);
-  console.log('   2a captura habilitada:', $('secCam').disabled === false);
+  console.log('   fotos adicionais habilitadas:', $('nrmCam').disabled === false && $('rakFile').disabled === false);
 
-  pick('secFile', secPng, 'sec.png');
-  await waitFor(() => /alinhada|não alinhou|erro/.test($('secPill').textContent), 'alinhamento');
-  console.log('3. segunda captura:', $('secPill').textContent, '|', $('secStatus').textContent);
+  pick('rakFile', secPng, 'rasante.png');
+  await waitFor(() => shotPills().length === 1 && /alinhada|falhou/.test(shotPills()[0]), 'alinhamento da foto rasante');
+  console.log('3. foto rasante:', shotPills()[0], '|', window.document.querySelector('#shotList .shot-info').textContent);
+  check(shotPills()[0] === 'alinhada', 'foto rasante alinhou');
   console.log('   triagem:', $('triLevel').textContent, '| danos', $('triCount').textContent, '| area', $('triArea').textContent);
+
+  // foto de detalhe (luz normal) junto com outra rasante, duas de uma vez pela galeria
+  pick('nrmFile', detailPng, 'detalhe.png');
+  await waitFor(() => shotPills().length === 2 && /alinhada|falhou/.test(shotPills()[1]), 'alinhamento do detalhe');
+  console.log('3b. foto de detalhe:', shotPills()[1], '|', window.document.querySelectorAll('#shotList .shot-info')[1].textContent);
+  check(shotPills()[1] === 'alinhada', 'detalhe alinhou');
+  check(/detalhe/.test(window.document.querySelectorAll('#shotList .shot-info')[1].textContent), 'detalhe reconhecido como zoom');
   const rows = [...window.document.querySelectorAll('#tblBody tr')].map((r) => [...r.children].map((c) => c.textContent).join(' | '));
   rows.forEach((r) => console.log('   ', r));
 
@@ -119,11 +134,29 @@ function pick(inputId, buf, name) {
   await sleep(3000);
   console.log('5. reanalise (sigma 3): danos', $('triCount').textContent);
 
+  // tipo de obra: impresso, com recorte e remocao de foto
+  $('modeImpresso').checked = true; $('modeImpresso').dispatchEvent(new window.Event('change'));
+  await sleep(300); await waitFor(() => /analisada/.test($('refPill').textContent) && !$('slidersImpresso').hidden, 'modo impresso');
+  await sleep(2500);
+  console.log('5b. modo impresso: danos', $('triCount').textContent, '| descartadas', $('triRej').textContent, '| nota visivel =', !$('printNote').hidden, '| tipos =', [...new Set([...window.document.querySelectorAll('#tblBody tr')].map((r) => r.children[1].textContent))].join(','));
+  check(!$('printNote').hidden, 'nota do modo impresso visivel');
+  $('cropL').value = '10'; $('cropL').dispatchEvent(new window.Event('input')); $('cropL').dispatchEvent(new window.Event('change'));
+  await sleep(600); await waitFor(() => /analisada/.test($('refPill').textContent), 'recorte');
+  await sleep(2500);
+  console.log('5c. recorte esquerdo 10%: danos', $('triCount').textContent);
+  window.document.querySelectorAll('#shotList button')[0].click();
+  await sleep(300);
+  check(shotPills().length === 1, 'remover foto');
+  console.log('5d. foto removida; restam', shotPills().length);
+  $('modePintura').checked = true; $('modePintura').dispatchEvent(new window.Event('change'));
+  await sleep(300); await waitFor(() => /analisada/.test($('refPill').textContent) && !$('slidersPintura').hidden, 'voltar a pintura');
+  await sleep(1500);
+
   // relatorio
   $('copyJson').click(); await sleep(100);
   const jsonTxt = $('jsonFallback').value;
   const rep = JSON.parse(jsonTxt);
-  console.log('6. relatorio JSON ok: danos =', rep.danos.length, '| triagem =', rep.triagem.level, '| chaves =', Object.keys(rep).join(','));
+  console.log('6. relatorio JSON ok: fotos adicionais =', rep.fotosAdicionais.length, '| tipo =', rep.tipoDeObra, '| danos =', rep.danos.length, '| triagem =', rep.triagem.level, '| chaves =', Object.keys(rep).join(','));
   console.log('\nERROS DE JS:', errors.length ? errors : 'nenhum');
   process.exit(errors.length ? 1 : 0);
 })().catch((e) => { console.error('FALHA:', e.message); console.error(errors); process.exit(1); });

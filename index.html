@@ -29,6 +29,12 @@
           <span class="pill idle" id="refPill">aguardando foto</span>
         </div>
         <p class="muted">Fotografe a obra com luz normal, de frente, com a peça inteira no quadro. A resolução original é preservada na medição e reduzida só para processar.</p>
+        <fieldset class="mode">
+          <legend>Tipo de obra</legend>
+          <label class="chip"><input type="radio" name="mode" id="modePintura" value="pintura" checked><span>Pintura</span></label>
+          <label class="chip"><input type="radio" name="mode" id="modeImpresso" value="impresso"><span>Impresso ou ilustração</span></label>
+        </fieldset>
+        <p class="muted small" id="modeHelp">Pintura procura rachaduras e perda de cor. Impresso ou ilustração (poster, steelbook, quadrinho) procura manchas escuras, como ferrugem e tinta solta, e ignora o desenho.</p>
         <div class="btn-row">
           <label class="btn primary" for="refCam" id="refCamBtn" aria-disabled="true">Fotografar obra</label>
           <label class="btn" for="refFile" id="refFileBtn" aria-disabled="true">Escolher da galeria</label>
@@ -49,17 +55,28 @@
         <div class="chips" id="chips" hidden>
           <label class="chip"><input type="checkbox" id="tglDamage" checked><span>Danos</span></label>
           <label class="chip"><input type="checkbox" id="tglTiles"><span>Regiões descartadas</span></label>
-          <label class="chip"><input type="checkbox" id="tglSec" disabled><span>2ª captura alinhada</span></label>
+          <label class="chip"><input type="checkbox" id="tglSec" disabled><span>Última foto alinhada</span></label>
         </div>
+        <details class="crop" id="cropBox" hidden>
+          <summary>Recortar a peça (tirar mesa, parede e objetos ao redor)</summary>
+          <div>
+            <p class="muted small">Corte cada lado até a linha tracejada ficar sobre a borda da obra. Só o que está dentro é analisado.</p>
+            <div class="slider"><label for="cropL">Esquerda: <span class="mono" id="cropLVal">0%</span></label><input type="range" id="cropL" min="0" max="45" value="0"></div>
+            <div class="slider"><label for="cropT">Topo: <span class="mono" id="cropTVal">0%</span></label><input type="range" id="cropT" min="0" max="45" value="0"></div>
+            <div class="slider"><label for="cropR">Direita: <span class="mono" id="cropRVal">0%</span></label><input type="range" id="cropR" min="0" max="45" value="0"></div>
+            <div class="slider"><label for="cropB">Base: <span class="mono" id="cropBVal">0%</span></label><input type="range" id="cropB" min="0" max="45" value="0"></div>
+            <div class="btn-row"><button class="btn" id="cropReset" type="button">Sem recorte</button></div>
+          </div>
+        </details>
         <div class="slider" id="alphaWrap" hidden>
-          <label for="alpha">Mistura da 2ª captura sobre a referência: <span class="mono" id="alphaVal">50%</span></label>
+          <label for="alpha">Mistura da última foto sobre a referência: <span class="mono" id="alphaVal">50%</span></label>
           <input type="range" id="alpha" min="0" max="100" value="50">
         </div>
         <div class="legend" id="legend" hidden>
-          <span><i style="border-color: var(--c-both)"></i>nas duas capturas</span>
+          <span><i style="border-color: var(--c-both)"></i>luz normal e rasante</span>
           <span><i style="border-color: var(--c-normal)"></i>só luz normal</span>
-          <span><i style="border-color: var(--c-raking)"></i>só 2ª captura</span>
-          <span class="mono">R rachadura · C perda de cor</span>
+          <span><i style="border-color: var(--c-raking)"></i>só luz rasante</span>
+          <span class="mono" id="legendLetters">R rachadura · C perda de cor</span>
         </div>
         <div class="btn-row" id="mapBtnRow" hidden>
           <button class="btn" id="makeImg" type="button">Gerar imagem do mapa</button>
@@ -97,17 +114,31 @@
 
       <section class="panel" aria-labelledby="h-sec">
         <div class="panel-head">
-          <h2 id="h-sec">2. Segunda captura</h2>
+          <h2 id="h-sec">2. Mais fotos</h2>
           <span class="pill idle" id="secPill">opcional</span>
         </div>
-        <p class="muted">Luz rasante ou luz transmitida, sem mover a obra e com enquadramento parecido. O app alinha as duas fotos por pontos de interesse (ORB) e junta os danos num mapa só.</p>
-        <div class="btn-row">
-          <label class="btn primary" for="secCam" id="secCamBtn" aria-disabled="true">Fotografar</label>
-          <label class="btn" for="secFile" id="secFileBtn" aria-disabled="true">Escolher da galeria</label>
-          <input type="file" id="secCam" accept="image/*" capture="environment">
-          <input type="file" id="secFile" accept="image/*">
+        <p class="muted">Adicione quantas fotos quiser: de detalhe (aproxime de uma região para ver manchas pequenas) e com luz rasante. Não mova a obra. O app alinha cada foto à referência por pontos de interesse (ORB) e junta tudo num mapa só.</p>
+        <div class="shot-group">
+          <span class="shot-title">Luz normal</span>
+          <div class="btn-row">
+            <label class="btn primary" for="nrmCam" id="nrmCamBtn" aria-disabled="true">Fotografar</label>
+            <label class="btn" for="nrmFile" id="nrmFileBtn" aria-disabled="true">Galeria</label>
+            <input type="file" id="nrmCam" accept="image/*" capture="environment">
+            <input type="file" id="nrmFile" accept="image/*" multiple>
+          </div>
         </div>
-        <div class="status-line" id="secStatus"></div>
+        <div class="shot-group">
+          <span class="shot-title">Luz rasante</span>
+          <div class="btn-row">
+            <label class="btn primary" for="rakCam" id="rakCamBtn" aria-disabled="true">Fotografar</label>
+            <label class="btn" for="rakFile" id="rakFileBtn" aria-disabled="true">Galeria</label>
+            <input type="file" id="rakCam" accept="image/*" capture="environment">
+            <input type="file" id="rakFile" accept="image/*" multiple>
+          </div>
+        </div>
+        <div id="shotListWrap" hidden>
+          <ul class="shot-list" id="shotList"></ul>
+        </div>
       </section>
 
       <section class="panel" aria-labelledby="h-tri">
@@ -123,6 +154,7 @@
             <div class="mini"><span class="lab">Tempo de análise</span><span class="val" id="triMs">--</span></div>
           </div>
           <p class="muted" style="font-size:0.8rem">Os limites de prioridade são heurísticos e servem para ordenar a fila, não para classificar o estado da obra.</p>
+          <p class="muted" style="font-size:0.8rem" id="printNote" hidden>Em obra impressa, as regiões com muito desenho não são analisadas (ative "Regiões descartadas" no mapa para ver quais). Essas áreas continuam precisando do olhar do profissional.</p>
         </div>
         <div class="tbl-wrap" id="tblWrap" hidden>
           <table>
@@ -133,15 +165,28 @@
         <details>
           <summary>Ajustar sensibilidade</summary>
           <div>
-            <div class="slider">
-              <label for="sCrack">Rachaduras: <span class="mono" id="sCrackVal"></span></label>
-              <input type="range" id="sCrack" min="2" max="6" step="0.5" value="4">
+            <div id="slidersPintura">
+              <div class="slider">
+                <label for="sCrack">Rachaduras: <span class="mono" id="sCrackVal"></span></label>
+                <input type="range" id="sCrack" min="2" max="6" step="0.5" value="4">
+              </div>
+              <div class="slider">
+                <label for="sLoss">Perda de cor: <span class="mono" id="sLossVal"></span></label>
+                <input type="range" id="sLoss" min="25" max="70" step="1" value="42">
+              </div>
+              <p class="muted small">Valores menores detectam mais, com mais falsos alarmes. Rachaduras: desvios acima da média local. Perda de cor: distância ao fundo local.</p>
             </div>
-            <div class="slider">
-              <label for="sLoss">Perda de cor: <span class="mono" id="sLossVal"></span></label>
-              <input type="range" id="sLoss" min="25" max="70" step="1" value="42">
+            <div id="slidersImpresso" hidden>
+              <div class="slider">
+                <label for="sDark">Contraste mínimo da mancha: <span class="mono" id="sDarkVal"></span></label>
+                <input type="range" id="sDark" min="10" max="40" step="1" value="18">
+              </div>
+              <div class="slider">
+                <label for="sDetail">Detalhe do desenho aceito: <span class="mono" id="sDetailVal"></span></label>
+                <input type="range" id="sDetail" min="0.25" max="0.55" step="0.01" value="0.36">
+              </div>
+              <p class="muted small">Contraste menor acha mais manchas, com mais falsos alarmes. Detalhe maior analisa mais área da peça, mas aceita regiões em que o desenho impresso se confunde com dano.</p>
             </div>
-            <p class="muted" style="font-size:0.8rem">Valores menores detectam mais, com mais falsos alarmes. Rachaduras: desvios acima da média local. Perda de cor: distância ao fundo local.</p>
             <div class="btn-row"><button class="btn" id="reanalyze" type="button" disabled>Reanalisar</button></div>
           </div>
         </details>
