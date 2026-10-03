@@ -102,6 +102,10 @@ function check(cond, label) { if (!cond) throw new Error('verificacao falhou: ' 
   console.log('   iluminacao:', $('illPill').textContent, $('illVal').textContent, '|', $('illMsg').textContent);
   console.log('   triagem:', $('triLevel').textContent, '| danos', $('triCount').textContent, '| area', $('triArea').textContent, '| descartadas', $('triRej').textContent);
   console.log('   fotos adicionais habilitadas:', $('nrmCam').disabled === false && $('rakFile').disabled === false);
+  // neste teste o arquivo do modelo nao existe (jsdom nao baixa): o padrao e o modelo, entao o app tem que ligar o classico sozinho
+  check(/indispon/.test($('modelStatus').textContent), 'aviso de modelo indisponivel');
+  check(!$('useModel').checked && $('useClassic').checked, 'sem modelo, o detector classico e ligado');
+  console.log('   detectores (modelo ausente): modelo =', $('useModel').checked, '| classico =', $('useClassic').checked, '|', $('modelStatus').textContent);
 
   pick('rakFile', secPng, 'rasante.png');
   await waitFor(() => shotPills().length === 1 && /alinhada|falhou/.test(shotPills()[0]), 'alinhamento da foto rasante');

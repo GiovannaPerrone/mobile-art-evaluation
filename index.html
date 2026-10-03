@@ -36,10 +36,11 @@
         </fieldset>
         <p class="muted small" id="modeHelp">Pintura procura rachaduras e perda de cor. Impresso ou ilustração (poster, steelbook, quadrinho) procura manchas escuras, como ferrugem e tinta solta, e ignora o desenho.</p>
         <fieldset class="mode">
-          <legend>Detector adicional</legend>
-          <label class="chip"><input type="checkbox" id="useModel"><span>Modelo treinado (experimental)</span></label>
+          <legend>Detectores</legend>
+          <label class="chip"><input type="checkbox" id="useModel" checked><span>Modelo treinado (YOLO)</span></label>
+          <label class="chip"><input type="checkbox" id="useClassic"><span>Detector clássico</span></label>
         </fieldset>
-        <p class="muted small" id="modelHelp">Soma ao detector clássico um modelo aprendido (YOLO), treinado em pinturas de cavalete com perda de camada de tinta. Na primeira vez baixa cerca de 12 MB e leva alguns segundos por foto. As marcas do detector clássico não mudam: as do modelo aparecem em outra cor, com a letra A.</p>
+        <p class="muted small" id="modelHelp">O modelo treinado (YOLO) é o detector principal para pinturas: foi treinado em pinturas de cavalete com perda de camada de tinta, baixa cerca de 12 MB na primeira vez e leva alguns segundos por foto. O detector clássico (visão computacional sem aprendizado) é opcional e serve de apoio, principalmente em impressos e ilustrações. Marcas do modelo aparecem com a letra A.</p>
         <div class="status-line" id="modelStatus" role="status"></div>
         <div class="btn-row">
           <label class="btn primary" for="refCam" id="refCamBtn" aria-disabled="true">Fotografar obra</label>

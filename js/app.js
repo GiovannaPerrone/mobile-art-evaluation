@@ -18,7 +18,9 @@
     merged: null, triage: null,
     view: { damage: true, tiles: false, sec: false, alpha: 0.5 },
     forced: false, busy: false, times: {},
-    model: { on: false, M: null, state: 'idle', conf: 0.10, loadMs: 0 }   // modelo treinado (experimental)
+    // detectores: o modelo treinado (YOLO) e o detector principal em pintura; o classico e opcional (padrao em impresso)
+    model: { on: true, M: null, state: 'idle', conf: 0.10, loadMs: 0, loading: null },
+    classic: { on: false }
   };
 
   // ------------------------------------------------------------ utilidades
@@ -65,6 +67,8 @@
         enableCapture(true);
         initIllumination();
         syncSliders();
+        syncModelUI();
+        if (S.model.on) ensureModel().then(function (ok) { if (!ok) fallbackToClassic('Modelo indisponível: ' + (S.model.error || 'não carregou') + '. O detector clássico foi ligado no lugar.'); });
       });
     };
     s.onerror = function () {
@@ -86,9 +90,14 @@
     });
   }
   /** Carrega a biblioteca e o arquivo do modelo na primeira vez. Devolve true se o modelo ficou pronto. */
-  async function ensureModel() {
+  function ensureModel() {
     var m = S.model;
-    if (m.M && m.M.pronto()) return true;
+    if (m.M && m.M.pronto()) return Promise.resolve(true);
+    if (!m.loading) m.loading = loadModelOnce().then(function (ok) { m.loading = null; return ok; });
+    return m.loading;
+  }
+  async function loadModelOnce() {
+    var m = S.model;
     m.state = 'carregando';
     try {
       modelStatus('Verificando o arquivo do modelo...', 'warn');
@@ -106,8 +115,8 @@
       modelStatus('Modelo pronto · ' + ms(m.loadMs), 'ok');
       return true;
     } catch (e) {
-      m.state = 'erro'; m.M = null;
-      modelStatus('Modelo indisponível: ' + errText(e) + '. O detector clássico continua funcionando.', 'crit');
+      m.state = 'erro'; m.M = null; m.error = errText(e);
+      modelStatus('Modelo indisponível: ' + errText(e) + '. O detector clássico foi ligado no lugar.', 'crit');
       return false;
     }
   }
@@ -273,7 +282,7 @@
     resetShots();
     if (S.ref) { freeMat(S.ref.mat); if (S.ref.det) freeMat(S.ref.det.mask); }
     S.ref = null; S.forced = false; S.merged = null; S.triage = null;
-    modelStatus(S.model.state === 'pronto' ? 'Modelo pronto' : '', S.model.state === 'pronto' ? 'ok' : '');
+    if (S.model.state !== 'erro') modelStatus(S.model.state === 'pronto' ? 'Modelo pronto' : '', S.model.state === 'pronto' ? 'ok' : '');   // o aviso de falha fica na tela
     enableShots(false); $('overrideRow').hidden = true; $('copyJson').disabled = true; $('reanalyze').disabled = true;
     $('cropBox').hidden = true;
   }
@@ -313,29 +322,50 @@
 
   async function analyzeReference() {
     setPill($('refPill'), 'warn', 'analisando');
-    $('refStatus').textContent = S.mode === 'impresso'
-      ? 'Descartando regiões com muito detalhe e procurando manchas...'
+    $('refStatus').textContent = !S.classic.on ? 'Preparando o modelo treinado...'
+      : S.mode === 'impresso' ? 'Descartando regiões com muito detalhe e procurando manchas...'
       : 'Rejeitando regiões sem dano e detectando candidatos...';
     await tick();
+    var infoFoto = S.ref.meta.origW + ' × ' + S.ref.meta.origH + ' px (' + fmtBytes(S.ref.meta.bytes) + '), processada em ' + S.ref.meta.procW + ' × ' + S.ref.meta.procH + ' px.';
+    if (S.model.on) {
+      // o modelo e o detector principal: se nao carregar, liga o classico antes de seguir
+      var ready = await ensureModel();
+      if (!ready) fallbackToClassic('Modelo indisponível: ' + (S.model.error || 'não carregou') + '. O detector clássico foi ligado no lugar.');
+    }
     if (S.ref.det) freeMat(S.ref.det.mask);
     var roi = cropMask(S.ref.canvas.width, S.ref.canvas.height);
-    try { S.ref.det = S.P.detect(S.ref.mat, roi, { mode: S.mode }); } finally { freeMat(roi); }
+    try { S.ref.det = detectClassicOrEmpty(S.ref.mat, roi, { mode: S.mode }); } finally { freeMat(roi); }
     S.times.detectRef = S.ref.det.stats.ms;
-    $('refStatus').textContent = S.ref.meta.origW + ' × ' + S.ref.meta.origH + ' px (' + fmtBytes(S.ref.meta.bytes) + '), processada em ' + S.ref.meta.procW + ' × ' + S.ref.meta.procH + ' px.';
+    $('refStatus').textContent = infoFoto;
     $('overrideRow').hidden = true;
     enableShots(true); $('reanalyze').disabled = false; $('copyJson').disabled = false;
     for (var i = 0; i < S.shots.length; i++) {
       if (S.shots[i].reg && S.shots[i].reg.ok) await analyzeShot(S.shots[i]);
     }
     rebuildMerged();
-    drawView(); renderTriage(); renderShotList();      // o resultado do detector classico ja aparece
+    drawView(); renderTriage(); renderShotList();      // o resultado do detector classico (se ligado) ja aparece
     if (S.model.on) {
       setPill($('refPill'), 'warn', 'modelo treinado');
       try { await modelForAll(); } catch (e) { modelFailed(e); }
+      if (!S.model.on && S.ref.det.empty) {            // o modelo falhou no meio: faz a deteccao classica agora
+        var roi2 = cropMask(S.ref.canvas.width, S.ref.canvas.height);
+        try { freeMat(S.ref.det.mask); S.ref.det = S.P.detect(S.ref.mat, roi2, { mode: S.mode }); } finally { freeMat(roi2); }
+        for (var j = 0; j < S.shots.length; j++) { if (S.shots[j].reg && S.shots[j].reg.ok) await analyzeShot(S.shots[j]); }
+      }
       rebuildMerged();
       drawView(); renderTriage(); renderShotList();
     }
     setPill($('refPill'), 'ok', 'analisada');
+  }
+
+  /** Deteccao vazia, para quando o detector classico esta desligado: o resto do app continua igual. */
+  function emptyDetection(W, H) {
+    return { empty: true, boxes: [], mask: S.cv.Mat.zeros(H, W, S.cv.CV_8UC1),
+      tiles: { cols: 0, rows: 0, size: 32, keep: new Uint8Array(0), evaluated: 0, candidates: 0, rejected: 0 },
+      stats: { width: W, height: H, crackThr: null, damageFrac: 0, rejectedFrac: 0, crackCount: 0, lossCount: 0, ms: 0 } };
+  }
+  function detectClassicOrEmpty(rgba, roi, opts) {
+    return S.classic.on ? S.P.detect(rgba, roi, opts) : emptyDetection(rgba.cols, rgba.rows);
   }
 
   // ------------------------------------------------------------ fotos adicionais
@@ -382,9 +412,9 @@
     try {
       roiShot = S.P.warpMaskToShot(roiRef, sh.reg.H, sh.mat.cols, sh.mat.rows);
       var sideEff = Math.max(W, H) / Math.max(0.05, sh.scale);
-      sh.det = S.P.detect(sh.mat, roiShot, { mode: S.mode, sideEff: sideEff });
-      sh.refBoxes = S.P.mapBoxes(sh.det.boxes, sh.reg.H, W, H);
-      sh.refMask = S.P.warpMask(sh.det.mask, sh.reg.H, W, H);
+      sh.det = detectClassicOrEmpty(sh.mat, roiShot, { mode: S.mode, sideEff: sideEff });
+      sh.refBoxes = sh.det.empty ? [] : S.P.mapBoxes(sh.det.boxes, sh.reg.H, W, H);
+      sh.refMask = sh.det.empty ? null : S.P.warpMask(sh.det.mask, sh.reg.H, W, H);
     } finally { freeMat(roiRef); freeMat(roiShot); }
     S.times['detect' + sh.id] = sh.det.stats.ms;
   }
@@ -535,9 +565,9 @@
     $('triLevel').textContent = S.triage.level === 'media' ? 'média' : S.triage.level;
     $('triCount').textContent = String(S.merged.length);
     $('triArea').textContent = pct(S.triage.damageFrac, 2);
-    $('triRej').textContent = pct(det.stats.rejectedFrac, 0);
-    var total = det.stats.ms;
-    S.shots.forEach(function (s) { if (s.det) total += s.det.stats.ms + (s.reg ? s.reg.ms : 0); });
+    $('triRej').textContent = det.empty ? '--' : pct(det.stats.rejectedFrac, 0);
+    var total = det.stats.ms + (S.model.on && S.ref.model ? S.ref.model.ms : 0);
+    S.shots.forEach(function (s) { if (s.det) total += s.det.stats.ms + (s.reg ? s.reg.ms : 0) + (S.model.on && s.model ? s.model.ms : 0); });
     $('triMs').textContent = ms(total);
     $('printNote').hidden = S.mode !== 'impresso';
 
@@ -567,6 +597,7 @@
     var rows = [['Dispositivo', deviceLabel()]];
     if (S.times.engineLoad) rows.push(['Carga do motor', ms(S.times.engineLoad)]);
     rows.push(['Tipo de obra', S.mode === 'impresso' ? 'impresso / ilustração' : 'pintura']);
+    rows.push(['Detector clássico', S.classic.on ? 'ligado' : 'desligado']);
     if (S.model.on) {
       rows.push(['Modelo treinado', 'ativo · confiança mínima ' + fmtNum(S.model.conf, 2) + (S.model.loadMs ? ' · carga ' + ms(S.model.loadMs) : '')]);
       if (S.ref && S.ref.model) rows.push(['Modelo: tempo / caixas candidatas (ref.)', ms(S.ref.model.ms) + ' / ' + S.ref.model.boxes.length]);
@@ -578,7 +609,7 @@
       if (hasCrop()) rows.push(['Recorte (esq./topo/dir./base)', S.crop.l + '% / ' + S.crop.t + '% / ' + S.crop.r + '% / ' + S.crop.b + '%']);
       if (S.ref.ill) rows.push(['Luminância', S.ref.ill.meanL.toFixed(1)]);
       if (S.times.illumination != null) rows.push(['Tempo da iluminação', ms(S.times.illumination)]);
-      if (S.ref.det) {
+      if (S.ref.det && !S.ref.det.empty) {
         var t = S.ref.det.tiles;
         rows.push(['Regiões avaliadas', t.evaluated + ' (' + t.rejected + ' descartadas)']);
         if (S.ref.det.stats.crackThr != null) rows.push(['Limiar de rachadura', S.ref.det.stats.crackThr.toFixed(1)]);
@@ -607,6 +638,7 @@
       data: new Date().toISOString(),
       dispositivo: navigator.userAgent,
       tipoDeObra: S.mode,
+      detectores: { modeloTreinado: S.model.on, classico: S.classic.on },
       recortePercentual: S.crop,
       parametros: S.P.params,
       referencia: S.ref ? { meta: S.ref.meta, iluminacao: S.ref.ill, deteccao: S.ref.det ? S.ref.det.stats : null,
@@ -616,7 +648,7 @@
           alinhamento: sh.reg ? { ok: sh.reg.ok, pontosRef: sh.reg.kpRef, pontosFoto: sh.reg.kpSec, correspondencias: sh.reg.good, inliers: sh.reg.inliers, ms: sh.reg.ms, homografia: sh.reg.H } : null,
           deteccao: sh.det ? sh.det.stats : null };
       }),
-      modeloTreinado: S.model.on ? { ativo: true, arquivo: MODEL_URL, confiancaMinima: S.model.conf, experimental: true,
+      modeloTreinado: S.model.on ? { ativo: true, arquivo: MODEL_URL, confiancaMinima: S.model.conf, experimental: false,
         referencia: S.ref && S.ref.model ? { ms: S.ref.model.ms, caixasCandidatas: S.ref.model.boxes.length } : null } : { ativo: false },
       danos: (S.merged || []).map(function (e) { return { id: e.id, tipo: e.type, x: e.x, y: e.y, largura: e.w, altura: e.h, centroNormalizado: [+e.cx.toFixed(4), +e.cy.toFixed(4)], vistoEm: e.sources, achadoPor: e.motores || ['classico'], confiancaModelo: e.scoreModelo != null ? +e.scoreModelo.toFixed(3) : undefined }; }),
       triagem: S.triage,
@@ -642,7 +674,7 @@
     ctx.fillStyle = '#101514'; ctx.fillRect(0, H, W, bar);
     var fs = Math.max(12, Math.round(bar * 0.26));
     ctx.font = '500 ' + fs + 'px ' + css('--font-data'); ctx.textBaseline = 'middle';
-    var items = [[css('--c-both'), 'normal e rasante'], [css('--c-normal'), 'só luz normal'], [css('--c-raking'), 'só luz rasante']];
+    var items = S.classic.on ? [[css('--c-both'), 'normal e rasante'], [css('--c-normal'), 'só luz normal'], [css('--c-raking'), 'só luz rasante']] : [];
     if (S.model.on) items.push([css('--c-model'), 'modelo treinado (A)']);
     var x = 14, y1 = H + bar * 0.3, y2 = H + bar * 0.74, sz = Math.round(fs * 0.9);
     items.forEach(function (it) {
@@ -650,7 +682,7 @@
       ctx.fillStyle = '#e6eeec'; ctx.fillText(it[1], x + sz + 8, y1); x += sz + 8 + ctx.measureText(it[1]).width + 20;
     });
     var label = 'Prioridade de inspeção: ' + (S.triage.level === 'media' ? 'média' : S.triage.level) + '  ·  ' +
-      (S.mode === 'impresso' ? 'M mancha (regiões escurecidas não foram analisadas)' : 'R rachadura  ·  C perda de cor');
+      (!S.classic.on ? 'A avaria encontrada pelo modelo treinado' : S.mode === 'impresso' ? 'M mancha (regiões escurecidas não foram analisadas)' : 'R rachadura  ·  C perda de cor');
     ctx.fillStyle = '#9db0ab'; ctx.fillText(label, 14, y2);
     $('mapImg').src = c.toDataURL('image/jpeg', 0.92);
     $('mapOut').hidden = false;
@@ -664,9 +696,12 @@
     $('sLoss').value = p.lossThr; $('sLossVal').textContent = String(p.lossThr);
     $('sDark').value = p.printDarkThr; $('sDarkVal').textContent = String(p.printDarkThr);
     $('sDetail').value = p.printDetailMax; $('sDetailVal').textContent = Math.round(p.printDetailMax * 100) + '%';
-    $('slidersPintura').hidden = S.mode !== 'pintura';
-    $('slidersImpresso').hidden = S.mode !== 'impresso';
-    $('legendLetters').textContent = (S.mode === 'impresso' ? 'M mancha escura' : 'R rachadura · C perda de cor') + (S.model.on ? ' · A avaria (modelo)' : '');
+    $('slidersPintura').hidden = S.mode !== 'pintura' || !S.classic.on;
+    $('slidersImpresso').hidden = S.mode !== 'impresso' || !S.classic.on;
+    var letras = [];
+    if (S.classic.on) letras.push(S.mode === 'impresso' ? 'M mancha escura' : 'R rachadura · C perda de cor');
+    if (S.model.on) letras.push('A avaria (modelo)');
+    $('legendLetters').textContent = letras.join(' · ');
   }
 
   async function reanalyzeAll(msg) {
@@ -715,10 +750,13 @@
   $('reanalyze').addEventListener('click', function () { reanalyzeAll('Análise atualizada'); });
 
   // modelo treinado (experimental): liga e desliga sem tocar no detector classico
-  function modelFailed(e) {
-    S.model.on = false; $('useModel').checked = false; syncModelUI(); syncSliders();
-    modelStatus('Falha ao rodar o modelo: ' + errText(e) + '. Seguindo só com o detector clássico.', 'crit');
+  function syncEngineChecks() { $('useModel').checked = S.model.on; $('useClassic').checked = S.classic.on; syncModelUI(); if (S.P) syncSliders(); }
+  /** O modelo nao carregou ou falhou: liga o detector classico para o app nunca ficar sem detector. */
+  function fallbackToClassic(texto) {
+    S.model.on = false; S.classic.on = true; syncEngineChecks();
+    modelStatus(texto, 'crit');
   }
+  function modelFailed(e) { fallbackToClassic('Falha ao rodar o modelo: ' + errText(e) + '. Seguindo com o detector clássico.'); }
   function refreshAfterModel() {
     if (!S.ref || !S.ref.det) return;
     rebuildMerged(); drawView(); renderTriage(); renderShotList();
@@ -726,21 +764,29 @@
   $('useModel').addEventListener('change', async function (e) {
     var want = e.target.checked;
     if (S.busy) { e.target.checked = !want; toast('Aguarde a análise terminar'); return; }
+    if (!want && !S.classic.on) { e.target.checked = true; toast('Deixe pelo menos um detector ligado'); return; }
     S.busy = true;
     try {
       if (want) {
         e.target.disabled = true;
         var ok = await ensureModel();
         e.target.disabled = false;
-        if (!ok) { e.target.checked = false; return; }
-        S.model.on = true; syncModelUI(); syncSliders();
+        if (!ok) { e.target.checked = false; modelStatus('Modelo indisponível: ' + (S.model.error || 'não carregou') + '.', 'crit'); return; }
+        S.model.on = true; syncEngineChecks();
         if (S.ref && S.ref.det) { await modelForAll(); refreshAfterModel(); toast('Modelo treinado ligado'); }
       } else {
-        S.model.on = false; syncModelUI(); syncSliders();
+        S.model.on = false; syncEngineChecks();
         modelStatus(S.model.state === 'pronto' ? 'Modelo pronto (desligado)' : '', S.model.state === 'pronto' ? 'ok' : '');
         refreshAfterModel();
       }
     } catch (err) { modelFailed(err); } finally { e.target.disabled = false; S.busy = false; }
+  });
+  $('useClassic').addEventListener('change', async function (e) {
+    var want = e.target.checked;
+    if (S.busy) { e.target.checked = !want; toast('Aguarde a análise terminar'); return; }
+    if (!want && !S.model.on) { e.target.checked = true; toast('Deixe pelo menos um detector ligado'); return; }
+    S.classic.on = want; syncEngineChecks();
+    if (S.ref && S.ref.det) { S.busy = true; try { await analyzeReference(); toast(want ? 'Detector clássico ligado' : 'Detector clássico desligado'); } finally { S.busy = false; } }
   });
   $('sModel').addEventListener('input', function (e) {
     S.model.conf = parseFloat(e.target.value); $('sModelVal').textContent = fmtNum(S.model.conf, 2);
@@ -753,7 +799,9 @@
     $(id).addEventListener('change', function (e) {
       if (!e.target.checked) return;
       S.mode = e.target.value;
-      if (S.P) syncSliders();
+      // padrao por tipo de obra: pintura usa o modelo treinado; impresso usa o classico (o modelo nao foi treinado com impressos)
+      S.model.on = S.mode === 'pintura'; S.classic.on = S.mode === 'impresso';
+      syncEngineChecks();
       if (S.mode === 'impresso') { S.view.tiles = true; $('tglTiles').checked = true; }
       reanalyzeAll('Tipo de obra: ' + (S.mode === 'impresso' ? 'impresso / ilustração' : 'pintura'));
       renderKV();
