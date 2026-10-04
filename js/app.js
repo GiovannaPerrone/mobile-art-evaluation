@@ -2,12 +2,13 @@
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var MAXSIDE = 1280;
-  var ENGINE_URL = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@5.0.0-release.1/dist/opencv.js';
+  var ENGINE_URL = 'vendor/opencv/opencv.js';
   var TYPE_LETTER = { 'rachadura': 'R', 'perda de cor': 'C', 'mancha': 'M', 'avaria (modelo)': 'A' };
   // Modelo treinado (YOLO, opcional): arquivo do repositorio e biblioteca de execucao no navegador
   var MODEL_URL = 'models/yolo-A-pinturas.onnx';
-  var ORT_URL = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort.wasm.min.js';
+  var ORT_URL = 'vendor/ort/ort.wasm.min.js';
   var MODEL_SIDE = 2560;                     // escala em que o modelo foi treinado (lado maior)
+  var vendorUrl = function (p) { try { return new URL(p, location.href).href; } catch (e) { return p; } };
 
   var S = {
     cv: null, P: null,
@@ -104,7 +105,8 @@
       var head = await fetch(MODEL_URL, { method: 'HEAD' });
       if (!head.ok) throw new Error('arquivo do modelo não encontrado neste endereço');
       modelStatus('Baixando a biblioteca de execução...', 'warn');
-      if (!window.ort) await loadScript(ORT_URL);
+      if (!window.ort) await loadScript(ORT_URL); 
+      window.ort.env.wasm.wasmPaths = vendorUrl('vendor/ort/');
       window.ort.env.wasm.proxy = false;
       m.M = window.createModelo(window.ort);
       var t0 = performance.now();
@@ -193,6 +195,7 @@
     var head = await fetch(m.url, { method: 'HEAD' });
     if (!head.ok) throw new Error('arquivo ' + m.url + ' não encontrado');
     if (!window.ort) await loadScript(ORT_URL);
+    window.ort.env.wasm.wasmPaths = vendorUrl('vendor/ort/');
     window.ort.env.wasm.proxy = false;
     var M = window.createModelo(window.ort), t0 = performance.now();
     await M.carregar(m.url);
