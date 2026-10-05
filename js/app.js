@@ -40,6 +40,32 @@
   }
   return { atualizar: atualizar, fim: fim };
 })();
+function ligarExemplos() {
+  var btn = document.getElementById('exemploBtn');
+  var input = document.getElementById('refFile');
+  if (!btn || !input) return;
+  var fotos = ['exemplos/exemplo-1.jpg', 'exemplos/exemplo-2.jpg', 'exemplos/exemplo-3.jpg'];
+  var atual = 0;
+  btn.addEventListener('click', async function () {
+    var caminho = fotos[atual];
+    atual = (atual + 1) % fotos.length;
+    var status = document.getElementById('refStatus');
+    try {
+      var resp = await fetch(caminho);
+      if (!resp.ok) throw new Error('arquivo não encontrado');
+      var blob = await resp.blob();
+      var arquivo = new File([blob], caminho.split('/').pop(), { type: blob.type || 'image/jpeg' });
+      var dt = new DataTransfer();
+      dt.items.add(arquivo);
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch (e) {
+      if (status) status.textContent = 'Foto de exemplo ainda não foi adicionada (' + caminho + ').';
+    }
+  });
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ligarExemplos);
+else ligarExemplos();
 
   var S = {
     cv: null, P: null,
