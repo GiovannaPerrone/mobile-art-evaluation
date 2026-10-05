@@ -158,3 +158,11 @@ textarea.fallback { width: 100%; min-height: 120px; font-family: var(--font-data
 .cmp-sw { width: 14px; height: 14px; border-radius: 3px; display: inline-block; flex: none; border: 2px solid rgba(0,0,0,0.45); }
 .cmp-nota { display: block; font-size: 0.72rem; color: var(--fg-muted); white-space: normal; max-width: 34ch; }
 .cmp-nome { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+
+/* modo apresentacao: letra maior, tema claro forcado (data-theme="light") e textos de ajuda escondidos */
+:root.apresentacao { font-size: 20px; }
+:root.apresentacao body { font-size: 19px; }
+:root.apresentacao .wrap { max-width: 1280px; }
+:root.apresentacao #modeHelp,
+:root.apresentacao #modelHelp { display: none; }
+.btn-apresentacao { position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 20; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
