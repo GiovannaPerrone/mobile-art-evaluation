@@ -66,6 +66,30 @@ function ligarExemplos() {
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ligarExemplos);
 else ligarExemplos();
+function ligarApresentacao() {
+  var root = document.documentElement;
+  var temaAntes = null;
+  var btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn btn-apresentacao';
+  btn.textContent = 'Modo apresentação';
+  document.body.appendChild(btn);
+  btn.addEventListener('click', function () {
+    var ligar = !root.classList.contains('apresentacao');
+    root.classList.toggle('apresentacao', ligar);
+    if (ligar) {
+      temaAntes = root.getAttribute('data-theme');
+      root.setAttribute('data-theme', 'light');
+      if (root.requestFullscreen && !document.fullscreenElement) root.requestFullscreen().catch(function () {});
+    } else {
+      if (temaAntes) root.setAttribute('data-theme', temaAntes); else root.removeAttribute('data-theme');
+      if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(function () {});
+    }
+    btn.textContent = ligar ? 'Sair do modo apresentação' : 'Modo apresentação';
+  });
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ligarApresentacao);
+else ligarApresentacao();
 
   var S = {
     cv: null, P: null,
