@@ -9,6 +9,37 @@
   var ORT_URL = 'vendor/ort/ort.wasm.min.js';
   var MODEL_SIDE = 2560;                     // escala em que o modelo foi treinado (lado maior)
   var vendorUrl = function (p) { try { return new URL(p, location.href).href; } catch (e) { return p; } };
+  var barraProgresso = (function () {
+  var box, bar, txt, t0 = 0;
+  function criar() {
+    box = document.createElement('div');
+    box.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#e6efe9;color:#1f3d33;font:13px system-ui,sans-serif';
+    bar = document.createElement('div');
+    bar.style.cssText = 'height:6px;width:0;background:#2e6b57;transition:width .2s';
+    txt = document.createElement('div');
+    txt.style.cssText = 'padding:4px 12px';
+    box.appendChild(bar);
+    box.appendChild(txt);
+    document.body.appendChild(box);
+  }
+  function atualizar(rotulo, i, n) {
+    if (!document.body || !n) return;
+    if (!box) criar();
+    if (!t0) t0 = performance.now();
+    var pct = Math.min(100, Math.round(100 * i / n));
+    var feitos = Math.max(i - 1, 0);
+    var seg = (performance.now() - t0) / 1000;
+    var resta = feitos > 0 ? Math.round(seg / feitos * (n - feitos)) : null;
+    bar.style.width = pct + '%';
+    txt.textContent = 'Lendo a ' + rotulo + ': ' + pct + '%' + (resta === null ? ' · calculando o tempo...' : ' · faltam cerca de ' + resta + ' s');
+    box.style.display = 'block';
+  }
+  function fim() {
+    t0 = 0;
+    if (box) box.style.display = 'none';
+  }
+  return { atualizar: atualizar, fim: fim };
+})();
 
   var S = {
     cv: null, P: null,
@@ -128,15 +159,16 @@
     var big = await readForModel(file), bigW = big.width;
     try {
       var res = await S.model.M.detectar(big, {
-        progresso: function (i, n) { modelStatus('Modelo treinado, ' + label + ': recorte ' + i + ' de ' + n, 'warn'); },
-        aguardar: tick
+       progresso: function (i, n) { modelStatus('Modelo treinado, ' + label + ': recorte ' + i + ' de ' + n, 'warn'); barraProgresso.atualizar(label, i, n); },
+      aguardar: tick
       });
+
       var k = destW / bigW;
       return {
         ms: res.ms, recortes: res.recortes,
         boxes: res.caixas.map(function (c) { return { x: c.x * k, y: c.y * k, w: c.w * k, h: c.h * k, area: c.w * k * c.h * k, score: c.score }; })
       };
-    } finally { big.width = 0; big.height = 0; }
+    } finally { big.width = 0; big.height = 0;  barraProgresso.fim(); }
   }
   async function modelForReference() {
     if (!S.model.on || !S.ref || S.ref.model) return;
