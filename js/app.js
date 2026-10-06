@@ -1056,5 +1056,6 @@ else ligarApresentacao();
   });
 
   renderKV();
+  window.__triagem = { S: S, cmp: cmp, CMP_MODELS: CMP_MODELS, cmpBoxes: cmpBoxes, cmpUnionFrac: cmpUnionFrac };
   loadEngine();
 })();
