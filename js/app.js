@@ -5,7 +5,7 @@
   var ENGINE_URL = 'vendor/opencv/opencv.js';
   var TYPE_LETTER = { 'rachadura': 'R', 'perda de cor': 'C', 'mancha': 'M', 'avaria (modelo)': 'A' };
   // Modelo treinado (YOLO, opcional): arquivo do repositorio e biblioteca de execucao no navegador
-  var MODEL_URL = 'models/yolo-A-pinturas.onnx';
+  var MODEL_URL = 'models/yolo-A-negA2.onnx';   // padrao desde 16/11/2026: A + negativos dificeis (menos alarme falso)
   var ORT_URL = 'vendor/ort/ort.wasm.min.js';
   var MODEL_SIDE = 2560;                     // escala em que o modelo foi treinado (lado maior)
   var vendorUrl = function (p) { try { return new URL(p, location.href).href; } catch (e) { return p; } };
@@ -101,7 +101,7 @@ else ligarApresentacao();
     view: { damage: true, tiles: false, sec: false, alpha: 0.5 },
     forced: false, busy: false, times: {},
     // detectores: o modelo treinado (YOLO) e o detector principal em pintura; o classico e opcional (padrao em impresso)
-    model: { on: true, M: null, state: 'idle', conf: 0.10, loadMs: 0, loading: null },
+    model: { on: true, M: null, state: 'idle', conf: 0.07, loadMs: 0, loading: null },
     classic: { on: false }
   };
 
@@ -260,20 +260,20 @@ else ligarApresentacao();
     $('legModel').hidden = !S.model.on;
   }
 
-  // ------------------------------------------------------------ comparar modelos (A, C2 e C4 na mesma foto)
-  // So para comparar e mostrar: a triagem, o mapa e o laudo continuam usando o modelo A. Cada modelo tem a sua sessao ONNX.
+  // ------------------------------------------------------------ comparar modelos (negA2, A e C4 na mesma foto)
+  // So para comparar e mostrar: a triagem, o mapa e o laudo usam o modelo padrao (negA2). Cada modelo tem a sua sessao ONNX.
   var CMP_MODELS = [
-    { id: 'A', url: 'models/yolo-A-pinturas.onnx', cor: '#1fd1ff', nota: 'pinturas de cavalete; o mais conservador' },
-    { id: 'C2', url: 'models/yolo-C2-pinturas-met.onnx', cor: '#ffd21f', nota: 'A mais pinturas do Met; intermediário' },
+    { id: 'negA2', url: 'models/yolo-A-negA2.onnx', cor: '#1fd1ff', nota: 'padrão do app: A treinado também com os próprios erros em pinturas limpas; menos alarme falso' },
+    { id: 'A', url: 'models/yolo-A-pinturas.onnx', cor: '#ffd21f', nota: 'o padrão anterior; bom no ArtInsight, mais alarme falso' },
     { id: 'C4', url: 'models/yolo-C4-pinturas-met.onnx', cor: '#ff5fa2', nota: 'A, Met e ARTeFACT; o mais sensível, com mais falsos alarmes' }
   ];
-  var cmp = { busy: false, on: { A: true, C2: true, C4: true }, conf: 0.10 };
+  var cmp = { busy: false, on: { negA2: true, A: true, C4: true }, conf: 0.07 };
 
   function cmpStatus(text, kind) { var el = $('cmpStatus'); el.textContent = text || ''; el.dataset.kind = kind || ''; }
   function cmpDone(ref) { return !!(ref && ref.cmp && CMP_MODELS.every(function (m) { return ref.cmp[m.id] && ref.cmp[m.id].boxes; })); }
   async function cmpLoad(m) {
     if (m.M && m.M.pronto()) return;
-    if (m.id === 'A' && S.model.M && S.model.M.pronto()) { m.M = S.model.M; return; }   // o A ja esta carregado pelo fluxo principal
+    if (m.url === MODEL_URL && S.model.M && S.model.M.pronto()) { m.M = S.model.M; return; }   // o padrao ja esta carregado pelo fluxo principal
     var head = await fetch(m.url, { method: 'HEAD' });
     if (!head.ok) throw new Error('arquivo ' + m.url + ' não encontrado');
     if (!window.ort) await loadScript(ORT_URL);
@@ -325,7 +325,7 @@ else ligarApresentacao();
     var ctx = cv0.getContext('2d');
     paintTo(ctx, W, H, { damage: false, tiles: false, sec: false, alpha: 0, crop: true });
     var lw = Math.max(2, W / 450);
-    CMP_MODELS.slice().reverse().forEach(function (m) {            // o A por cima: e o que tem menos caixas
+    CMP_MODELS.slice().reverse().forEach(function (m) {            // o padrao (negA2) por cima: e o que tem menos caixas
       if (!cmp.on[m.id]) return;
       cmpBoxes(ref, m.id).forEach(function (b) {
         var pad = lw;
@@ -381,7 +381,7 @@ else ligarApresentacao();
       for (var i = 0; i < CMP_MODELS.length; i++) {
         var m = CMP_MODELS[i];
         if (ref.cmp[m.id] && ref.cmp[m.id].boxes) continue;
-        if (m.id === 'A' && ref.model) { ref.cmp.A = { ms: ref.model.ms, boxes: ref.model.boxes }; continue; }   // o fluxo principal ja rodou o A nesta foto
+        if (m.url === MODEL_URL && ref.model) { ref.cmp[m.id] = { ms: ref.model.ms, boxes: ref.model.boxes }; continue; }   // o fluxo principal ja rodou o padrao nesta foto
         try {
           cmpStatus('Carregando o modelo ' + m.id + '...', 'warn');
           await cmpLoad(m);
@@ -909,7 +909,7 @@ else ligarApresentacao();
     var fs = Math.max(12, Math.round(bar * 0.26));
     ctx.font = '500 ' + fs + 'px ' + css('--font-data'); ctx.textBaseline = 'middle';
     var items = S.classic.on ? [[css('--c-both'), 'normal e rasante'], [css('--c-normal'), 'só luz normal'], [css('--c-raking'), 'só luz rasante']] : [];
-    if (S.model.on) items.push([css('--c-model'), 'modelo treinado (A)']);
+    if (S.model.on) items.push([css('--c-model'), 'modelo treinado (negA2)']);
     var x = 14, y1 = H + bar * 0.3, y2 = H + bar * 0.74, sz = Math.round(fs * 0.9);
     items.forEach(function (it) {
       ctx.strokeStyle = it[0]; ctx.lineWidth = 3; ctx.strokeRect(x, y1 - sz / 2, sz, sz);

@@ -101,7 +101,7 @@
           <h2 id="h-cmp">Comparar modelos</h2>
           <span class="pill idle" id="cmpPill">aguardando foto</span>
         </div>
-        <p class="muted">Roda os três modelos treinados (A, C2 e C4) na foto de referência e mostra o que cada um marca, cada um com a sua cor. É só uma comparação: a triagem e o laudo continuam usando o modelo A. Cada modelo baixa cerca de 12 MB na primeira vez.</p>
+        <p class="muted">Roda três modelos treinados (negA2, A e C4) na foto de referência e mostra o que cada um marca, cada um com a sua cor. É só uma comparação: a triagem e o laudo usam o modelo padrão, o negA2. Cada modelo baixa cerca de 12 MB na primeira vez.</p>
         <div class="btn-row">
           <button class="btn primary" id="cmpRun" type="button" disabled>Comparar os 3 modelos</button>
         </div>
@@ -111,8 +111,8 @@
         </div>
         <div class="chips" id="cmpChips" hidden></div>
         <div class="slider" id="cmpConfWrap" hidden>
-          <label for="cmpConf">Confiança mínima (vale para os três): <span class="mono" id="cmpConfVal">0,10</span></label>
-          <input type="range" id="cmpConf" min="0.05" max="0.5" step="0.05" value="0.10">
+          <label for="cmpConf">Confiança mínima (vale para os três): <span class="mono" id="cmpConfVal">0,07</span></label>
+          <input type="range" id="cmpConf" min="0.05" max="0.5" step="0.01" value="0.07">
         </div>
         <div class="tbl-wrap" id="cmpTblWrap" hidden>
           <table>
@@ -225,8 +225,8 @@
             </div>
             <div id="slidersModelo" hidden>
               <div class="slider">
-                <label for="sModel">Confiança mínima do modelo: <span class="mono" id="sModelVal">0,10</span></label>
-                <input type="range" id="sModel" min="0.05" max="0.5" step="0.05" value="0.10">
+                <label for="sModel">Confiança mínima do modelo: <span class="mono" id="sModelVal">0,07</span></label>
+                <input type="range" id="sModel" min="0.05" max="0.5" step="0.01" value="0.07">
               </div>
               <p class="muted small">Valores menores mostram mais marcas do modelo, com mais falsos alarmes. Mexer aqui não refaz a leitura do modelo: só filtra o que ele já achou.</p>
             </div>
